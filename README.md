@@ -28,7 +28,7 @@ The relationships that matter are who can give to whom (`COMPATIBLE`), why (bloo
 | `Donor {id, altruistic}` | `(Donor or Patient)-[:HAS_BLOOD]->(BloodType)` |
 | `BloodType {name}` | `(BloodType)-[:ABO_CAN_GIVE_TO]->(BloodType)` |
 | `Antigen {name}` | `(Donor)-[:HAS_ANTIGEN]->(Antigen)`, `(Patient)-[:HAS_ANTIBODY]->(Antigen)` |
-| `MatchRun {id, seq, created_at, objective, solver, transplants, ...}` | `(Donor)-[:COMPATIBLE]->(Patient)`, derived in Cypher from the two rules above |
+| `MatchRun {id, seq, created_at, objective, policy, policy_sha256, solver, transplants, ...}` | `(Donor)-[:COMPATIBLE]->(Patient)`, derived in Cypher from the two rules above |
 | `Exchange {id, kind, size}` | `(MatchRun)-[:SELECTED]->(Exchange)-[:INCLUDES {order, role}]->(Donor or Patient)` |
 
 The blood-type and antibody rules are data in the graph, not code. Cypher derives from them every `COMPATIBLE` edge and each patient's `pool_pra`, the share of this pool's donors their antibodies rule out. Pool PRA plays the role cPRA plays in real programs, but it is not the clinical cPRA, which is computed against a reference donor population. A test checks the derived edges against an independent Python implementation of the same rules.
@@ -77,6 +77,7 @@ kx why P001                 # a matched patient: the exchange that serves them
 kx whatif --withdraw D085   # repair the plan without donor D085, then roll back
 kx options                  # candidate cycles and arcs for a round
 kx match                    # solve again and record a new MatchRun
+kx simulate                 # replay the count plan and the failure-aware plan on sampled outcomes (read-only)
 ```
 
 ```text
@@ -126,24 +127,82 @@ The server exposes `read_cypher` and `get_schema` only, and refuses `write_cyphe
 
 1. `find_cycles` enumerates every 2-way and 3-way cycle with one Cypher `MATCH` per hop (38,332 on the committed store).
 2. Chains are not enumerated. The same pool has 47,572 two-step chains, and enumerating three-step chains exceeded the engine's 256 MB value limit. The solver builds chains from the 19,742 `COMPATIBLE` arcs instead. It follows the position-indexed chain idea of [Dickerson, Manlove, Plaut, Sandholm and Trimble (2016)](https://arxiv.org/abs/1606.01623): one variable per arc and chain position, and a paired donor gives at position k+1 only if their own patient received at position k.
-3. The integer program is solved exactly with HiGHS through `scipy.optimize.milp`. Each transplant is worth 1, plus a tie-break of at most 1/(patients+1) that favours high pool PRA and long waits. Summed over all patients, the tie-break stays below one transplant, so it never costs one.
+3. The integer program is solved exactly with HiGHS through `scipy.optimize.milp`. Each transplant is worth 1, plus a tie-break of at most 1/(patients+1) set by a policy file (the default favours high pool PRA and long waits). Summed over all patients, the tie-break stays below one transplant, so it never costs one.
 4. Cycles are capped at 3 pairs and chains at 4 transplants. Programs cap cycle length because every transplant in a cycle needs simultaneous surgery, as surveyed in [this 2025 review](https://arxiv.org/pdf/2504.04091). The chain cap of 4 is this project's choice.
 
 The compatibility rules are simplified: ABO blood type plus a synthetic antibody to antigen match over 32 HLA antigen names. The blood-type frequencies and antibody counts in the generator are illustrative, not population statistics.
 
+## Policies and failure-aware matching
+
+Real paired-donation programs see most planned matches fall through. In the OPTN/UNOS pilot, only 8% of the match offers studied led to a transplant, and 32.6% of refused offers were refused for crossmatch reasons ([Leishman et al., ATC 2015](https://atcmeetingabstracts.com/?p=466)). Plain `kx match` assumes every compatible arc succeeds. Two options change that.
+
+**Policy files.** A policy is a JSON file under [`policies/`](policies). It sets the tie-break score and an edge success model. `kx match --policy <file>` uses it (default [`policies/default.json`](policies/default.json)), and the `MatchRun` records the policy name and a SHA-256 of the file, with line endings normalised to LF. Each patient's tie-break score is divided by the largest score the policy can give in this pool, so it lies in [0, 1], and the total over all patients stays below one transplant for every policy. A test checks this for each shipped file.
+
+- [`policies/default.json`](policies/default.json) reproduces the original scoring exactly (0.7 x pool PRA + 0.3 x wait share). The 0.7 and 0.3 are this project's choice, not from a published scheme. With it, the solver picks the same 66 exchanges as the committed run R1.
+- [`policies/optn-kpd-2019-inspired.json`](policies/optn-kpd-2019-inspired.json) is **inspired by, not a certified implementation of**, [OPTN Policy 13.7.F, Table 13-2: OPTN KPD Prioritization Points](https://optn.transplant.hrsa.gov/media/3239/20191011_kidney_kpd_priority_points.pdf), effective 8 October 2019 (read from the [Internet Archive copy](http://web.archive.org/web/20250527133532/https://optn.transplant.hrsa.gov/media/3239/20191011_kidney_kpd_priority_points.pdf)). It uses the rows this pool can express: 0.07 points per day waiting, the CPRA sliding scale from 0 to 2000 points, 125 more points at CPRA 80% or above, candidate ABO points and paired-donor ABO points. Pool PRA, truncated to a whole percent, stands in for CPRA, and `wait_days` stands in for days registered in KPD. The file lists the rows it leaves out, which need data the pool lacks or depend on the donor-patient pair. OPTN picks the exchanges with the most total points, with 100 base points per match. KidneyLoop uses the points only to break ties between plans with the same number of transplants.
+
+**Edge success model.** Both policies use the same model, and every number in it comes from [Dickerson, Procaccia and Sandholm (2019), Failure-Aware Kidney Exchange](https://par.nsf.gov/servlets/purl/10120603), section 8.2. They report the crossmatch failure rates of Ashlagi et al. (2011) by CPRA band (0.05 for 0-24, 0.2 for 25-49, 0.35 for 50-74, 0.5 above 75) and add an exogenous failure rate of 0.08. So a planned transplant succeeds with probability 0.87, 0.72, 0.57 or 0.42, by the recipient's band. These are assumptions, labelled in the files: pool PRA stands in for CPRA; the top band starts at 75 because the source reports the band below as 50-74; transplants succeed or fail independently; and a transplant's chance depends only on its recipient.
+
+**Expected objective.** `kx match --objective expected` maximises expected transplants instead of planned ones, with the same paper's model. A cycle happens only if all its transplants do, so its value is multiplied by the product of their chances. A chain runs in order and stops at its first failure, so the transplant at position k is worth the chance that the first k all succeed. The position-indexed chain variables cannot see which patients came earlier, so the solver approximates. The arc at position k fixes the patient at k and, through its donor, the patient at k-1; the k-2 positions before those take the mean success over paired patients. This is exact for chains of up to two transplants and for any pool with one success rate, and tests check both cases against a brute-force search for the exact expected optimum. On longer chains with mixed rates, a test requires at least 95% of that optimum; on 300 random small pools the measured worst case was 96.1%, and 229 of the 237 pools with any exchange were exact. In this mode the tie-break still totals below one transplant, but two plans' expected transplants can differ by less than one, so the tie-break can outweigh a small expected difference. `--objective count`, the default, is the original behaviour.
+
+**Measured, not asserted.** `kx simulate --trials N --seed S` opens the store read-only. It solves the pool once per objective, then samples, for each trial, one outcome for every planned transplant; a transplant both plans use gets one shared draw. It realises cycles all-or-nothing and chains up to the first failure, and reports both plans on the same outcomes. On the committed store (built with seed 42, 300 pairs), each run takes about 40 seconds:
+
+```bash
+kx simulate --trials 1000 --seed 42
+```
+
+```text
+1000 trials, seed 42, policy default; same sampled outcomes for both plans
+plan            planned  expected  realized mean [95% CI]
+count               193      49.9  49.9 [49.3, 50.4]
+expected            185      84.5  84.6 [84.1, 85.1]
+expected - count, paired by trial: +34.7 [+34.0, +35.5]
+Realized transplants by pool PRA band, mean per trial:
+  0-24%    (123 patients): count 15.7, expected 45.0
+  25-49%   (50 patients): count 10.1, expected 13.5
+  50-74%   (48 patients): count 9.7, expected 12.9
+  75-100%  (79 patients): count 14.3, expected 13.3
+```
+
+```bash
+kx simulate --trials 1000 --seed 42 --policy policies/optn-kpd-2019-inspired.json
+```
+
+```text
+1000 trials, seed 42, policy optn-kpd-2019-inspired; same sampled outcomes for both plans
+plan            planned  expected  realized mean [95% CI]
+count               193      59.3  59.3 [58.7, 59.9]
+expected            185      84.5  84.8 [84.3, 85.3]
+expected - count, paired by trial: +25.5 [+24.7, +26.2]
+Realized transplants by pool PRA band, mean per trial:
+  0-24%    (123 patients): count 24.2, expected 45.0
+  25-49%   (50 patients): count 11.3, expected 13.5
+  50-74%   (48 patients): count 8.9, expected 12.9
+  75-100%  (79 patients): count 15.0, expected 13.4
+```
+
+What this shows, and what it does not:
+
+- The failure-aware plan plans 8 fewer transplants but realises about 35 more per round under the default policy (84.6 against 49.9), because it favours 2-way cycles and short chains, which survive more often.
+- It does **not** help the most sensitized patients. In the 75-100% pool PRA band it realises 13.3 transplants per round against 14.3 for the count plan, and 13.4 against 15.0 under the OPTN-inspired policy. The other three bands gain.
+- The OPTN-inspired tie-break alone raises the count plan from 49.9 to 59.3 realised transplants. Plans that tie on 193 planned transplants differ a lot in how many survive.
+- The simulation draws outcomes from the same success model the expected plan optimises, so it measures the gain if that model is right. It does not test failure rates that differ from the model. The model is synthetic: pool PRA is not CPRA, and the cited rates come from other pools.
+- `kx whatif` still re-plans with the default policy and the count objective.
+
 ## Testing and QA
 
 ```bash
-pytest -m "not qa_full"       # 229 tests, about 35 s
+pytest -m "not qa_full"       # 458 tests, about 40 s
 pytest -m qa_full             # the committed 300-pair store, about 2 min
 python scripts/mutation_check.py
 ```
 
 - **Unit tests.** Blood-type and antibody rules, pool PRA, cycle uniqueness, the recorded run reading back, explanations and what-if.
-- **Solver against brute force.** On 150 random small pools the solver's plan obeys every rule and equals the optimum of an independent exhaustive search.
+- **Solver against brute force.** On 150 random small pools the solver's plan obeys every rule and equals the optimum of an independent exhaustive search. The expected objective is checked against an exhaustive search for the exact expected optimum.
+- **Policies and simulation.** The default policy reproduces the original weights bit for bit, every shipped policy keeps the tie-break below one transplant, a malformed policy names the bad field, and simulated cycles and chains succeed and stop as the model says.
 - **Cypher against reference.** Cycles found by Cypher equal cycles found by an independent Python search on generated pools.
 - **End-to-end QA** (`tests/qa`). The real CLI runs on a fresh store. Tests cover reproducible builds, the relate CLI reading what Python wrote, a recorded run that obeys every rule with no unused cycle or altruist left, read-only commands and what-if leaving the store files unchanged, error exits, the MCP server, and the web page running the same Cypher as the CLI.
-- **Mutation check.** `scripts/mutation_check.py` plants eight known bugs one at a time, including a plan that changes with row order or Python's hash seed, and confirms the suite fails on each.
+- **Mutation check.** `scripts/mutation_check.py` plants eleven known bugs one at a time, including a plan that changes with row order or Python's hash seed, an expected objective that ignores chain position, and a simulated chain that continues past a failure, and confirms the suite fails on each.
 
 [docs/QA.md](docs/QA.md) lists the browser checks done by hand on the web explorer.
 
