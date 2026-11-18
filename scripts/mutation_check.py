@@ -48,6 +48,20 @@ MUTATIONS = [
         ["tests/test_runs.py"],
     ),
     (
+        "plan depends on the order rows arrive in",
+        "src/kidneyloop/solver.py",
+        "    cycles = sorted(inputs.cycles, key=lambda c: (c.patients, c.donors))\n    arcs = sorted(inputs.arcs, key=lambda a: (a.donor, a.patient))\n",
+        "    cycles = list(inputs.cycles)\n    arcs = list(inputs.arcs)\n",
+        ["tests/test_solver.py"],
+    ),
+    (
+        "plan depends on Python's hash seed",
+        "src/kidneyloop/solver.py",
+        "    for donor in sorted({a.donor for a in first}):\n",
+        "    for donor in {a.donor for a in first}:\n",
+        ["tests/test_reproducible.py"],
+    ),
+    (
         "tie-break can outweigh a transplant",
         "src/kidneyloop/solver.py",
         "return 1.0 + tie / (patients + 1)",

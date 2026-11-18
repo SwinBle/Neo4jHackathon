@@ -46,7 +46,7 @@ Donor `PAIRED_WITH` Patient; Donor and Patient `HAS_BLOOD` BloodType, which `ABO
 
 ### Testing
 
-208 tests, including a brute-force optimality check of the solver on 150 random pools, Cypher cycle enumeration checked against an independent search, end-to-end runs of the real CLI and MCP server, and a mutation check that plants six bugs and confirms the suite catches each. CI runs all of it on Linux.
+229 tests, including a brute-force optimality check of the solver on 150 random pools, Cypher cycle enumeration checked against an independent search, end-to-end runs of the real CLI and MCP server, and a mutation check that plants eight bugs and confirms the suite catches each. CI runs all of it on Linux.
 
 ### Data and safety
 

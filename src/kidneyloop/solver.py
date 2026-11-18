@@ -98,10 +98,14 @@ def solve(inputs: MatchInputs, max_chain: int = 4) -> Plan:
     donor, and a paired donor gives at position k+1 only if its own patient
     received at position k.
     """
-    cycles = list(inputs.cycles)
+    # Several plans often tie on value, and HiGHS returns the first it finds, which
+    # depends on variable order. Sorting makes the plan independent of the order
+    # Relate happens to return rows in, so the same pool always gives the same plan.
+    cycles = sorted(inputs.cycles, key=lambda c: (c.patients, c.donors))
+    arcs = sorted(inputs.arcs, key=lambda a: (a.donor, a.patient))
     paired_donors = set(inputs.donor_of.values())
-    first = [a for a in inputs.arcs if a.altruistic] if max_chain >= 1 else []
-    later = [a for a in inputs.arcs if not a.altruistic and a.donor in paired_donors]
+    first = [a for a in arcs if a.altruistic] if max_chain >= 1 else []
+    later = [a for a in arcs if not a.altruistic and a.donor in paired_donors]
     chain_vars = [(a, 1) for a in first] + [(a, k) for k in range(2, max_chain + 1) for a in later]
 
     n_vars = len(cycles) + len(chain_vars)
@@ -135,7 +139,7 @@ def solve(inputs: MatchInputs, max_chain: int = 4) -> Plan:
 
     for patient, vars_ in receives.items():
         add_row([(v, 1.0) for v in vars_], 1.0)
-    for donor in {a.donor for a in first}:
+    for donor in sorted({a.donor for a in first}):
         add_row([(v, 1.0) for v in gives_at[(donor, 1)]], 1.0)
     for patient, donor in inputs.donor_of.items():
         for k in range(1, max_chain):

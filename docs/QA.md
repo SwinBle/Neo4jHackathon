@@ -9,7 +9,7 @@ Automated checks run with `pytest` and `scripts/mutation_check.py`. See the READ
 | Explain P071 | Same lines as `kx why P071` |
 | Explain unknown id `p999` | "No patient P999." |
 | Withdraw D001 (a chain donor) | Marks its chain broken and names only the patients after D001 in the chain |
-| Withdraw D085 (a cycle donor) | Says P085 leaves with their donor and names P011 and P033 as waiting |
+| Withdraw D085 (a cycle donor) | Says P085 leaves with their donor and names P248 and P157 as waiting |
 | Explain P071, P004, P001, P161, P090 | Text identical to `kx why` for each, compared line by line in the browser |
 | Withdraw unknown D999 | "No donor D999 in this tab's graph." |
 | Reload graph | Restores the withdrawn donor |

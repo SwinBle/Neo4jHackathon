@@ -87,6 +87,17 @@ def test_solver_matches_brute_force_optimum_and_rules(seed):
     assert plan_value(plan, inputs) == pytest.approx(best_value(inputs, 3, 3), abs=1e-9)
 
 
+@pytest.mark.parametrize("seed", range(20))
+def test_plan_does_not_depend_on_input_order(seed):
+    inputs = random_inputs(seed)
+    rng = random.Random(seed)
+    cycles, arcs = list(inputs.cycles), list(inputs.arcs)
+    rng.shuffle(cycles)
+    rng.shuffle(arcs)
+    shuffled = MatchInputs(tuple(cycles), tuple(arcs), inputs.donor_of, inputs.weight)
+    assert set(solve(shuffled).exchanges) == set(solve(inputs).exchanges)
+
+
 def test_problems_catch_a_broken_plan():
     pairs = [("D1", "P1"), ("D2", "P2")]
     inputs = inputs_from([("D1", "P2"), ("D2", "P1")], pairs)

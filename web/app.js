@@ -50,7 +50,7 @@ async function load() {
 async function showRun() {
   const [summary] = await rows(Q.SUMMARY);
   if (!summary) {
-    $('#summary').replaceChildren(el('p', {}, 'No MatchRun in this store yet. Run `kx match` and reload.'));
+    $('#legend').replaceChildren(el('p', {}, 'This store has no matching run yet. Run `kx match`, then reload the page.'));
     return;
   }
   state.run = summary.run;
@@ -59,19 +59,49 @@ async function showRun() {
     .sort((a, b) => b.patients.length - a.patients.length || seq(a.id) - seq(b.id));
   state.holder = new Map(state.exchanges.flatMap((e) => e.patients.map((p) => [p, e.id])));
   state.giver = new Map(state.exchanges.flatMap((e) => e.donors.map((d) => [d, e.id])));
-  const cycles = state.exchanges.filter((e) => e.kind === 'cycle').length;
-  const chains = state.exchanges.length - cycles;
-  $('#summary').replaceChildren(
-    stat(summary.transplants, 'transplants'),
-    stat(summary.patients - state.holder.size, 'patients unmatched'),
-    stat(cycles, 'cycles chosen'),
-    stat(chains, 'chains chosen'),
-    stat(summary.cycles.toLocaleString(), 'candidate cycles'),
-    stat(summary.arcs.toLocaleString(), 'compatible arcs'),
+  const loops = state.exchanges.filter((e) => e.kind === 'cycle');
+  const chains = state.exchanges.filter((e) => e.kind === 'chain');
+  const inLoops = loops.reduce((n, e) => n + e.patients.length, 0);
+  const inChains = chains.reduce((n, e) => n + e.patients.length, 0);
+  const unmatched = summary.patients - state.holder.size;
+  $('#headline').textContent = `${summary.transplants} of ${summary.patients} patients get a kidney in this round`;
+  $('#round-total').textContent = `Run ${summary.run}, chosen from ${summary.cycles.toLocaleString()} possible loops and ${summary.arcs.toLocaleString()} donor-to-patient matches`;
+  const [cyc, chn, rest] = $('#bar').children;
+  rest.style.flexGrow = summary.patients;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    cyc.style.flexGrow = inLoops;
+    chn.style.flexGrow = inChains;
+    rest.style.flexGrow = unmatched;
+  }));
+  $('#bar').setAttribute('aria-label', `${inLoops} patients in loops, ${inChains} in chains, ${unmatched} unmatched, of ${summary.patients}`);
+  const key = (cls, n, text) => el('span', {}, el('i', { class: cls, style: `background: var(${cls})` }), el('span', { class: 'n' }, String(n)), ` ${text}`);
+  $('#legend').replaceChildren(
+    key('--served', inLoops, `in ${loops.length} loops`),
+    key('--gift', inChains, `in ${chains.length} chains from altruistic donors`),
+    key('--line', unmatched, 'not matched this round'),
   );
-  $('#run-meta').textContent = `${summary.run} · ${summary.solver} · ${summary.objective}`;
+  $('#run-meta').textContent = `Solver: ${summary.solver}. Objective: ${summary.objective}.`;
+  drawHero(loops);
   drawExchanges();
   await fillPatientPickers();
+}
+
+// The hero shows one real loop from this run, drawn arrow by arrow: the fastest way
+// to see what a paired exchange is.
+function drawHero(loops) {
+  const loop = loops.find((e) => e.patients.length === 3) ?? loops[0];
+  if (!loop) return;
+  const svg = exchangeSvg(loop, new Map(), HERO);
+  svg.classList.add('draw');
+  [...svg.querySelectorAll('.edge')].forEach((edge, i) => { edge.style.animationDelay = `${300 + i * 650}ms`; });
+  const steps = loop.donors.map((d, i) => `${d} gives to ${loop.patients[i]}`).join(', ');
+  $('#hero-figure').replaceChildren(svg, el('figcaption', {}, `Exchange ${loop.id} from this run: ${steps}.`));
+}
+
+function freshen(node) {
+  node.classList.remove('fresh');
+  void node.offsetWidth;
+  node.classList.add('fresh');
 }
 
 async function fillPatientPickers() {
@@ -79,15 +109,13 @@ async function fillPatientPickers() {
   $('#patient-ids').replaceChildren(...patients.map((p) => el('option', { value: p.id })));
   const hardest = patients.filter((p) => !state.holder.has(p.id)).slice(0, 8);
   $('#hard-picks').replaceChildren(
-    ...hardest.map((p) => el('button', { type: 'button', class: 'chip', onclick: () => explain(p.id) }, `${p.id} · ${Math.round(p.cpra * 100)}%`)),
+    ...hardest.map((p) => el('button', { type: 'button', class: 'chip', onclick: () => explain(p.id), 'aria-label': `Explain ${p.id}, cPRA ${Math.round(p.cpra * 100)} percent` }, p.id, el('span', { class: 'pct' }, `${Math.round(p.cpra * 100)}%`))),
   );
 }
 
 function revealInspector() {
   if (matchMedia('(max-width: 980px)').matches) $('#why-h').scrollIntoView({ block: 'start' });
 }
-
-const stat = (value, label) => el('div', { class: 'stat' }, el('strong', {}, String(value)), el('span', {}, label));
 
 function drawExchanges() {
   const broken = state.withdrawn ? new Set(state.withdrawn.broken) : new Set();
@@ -103,7 +131,7 @@ function drawExchanges() {
           'aria-label': `Show ${e.id}, ${e.kind} of ${e.patients.length}`,
           'aria-pressed': String(state.selected === e.id),
         },
-        el('span', { class: 'ex-id' }, `${e.id} · ${e.kind} of ${e.patients.length}`),
+        el('span', { class: 'ex-id' }, el('b', {}, e.id), `${e.kind === 'cycle' ? 'loop' : 'chain'} of ${e.patients.length}`),
         exchangeSvg(e),
       ),
     ),
@@ -113,10 +141,12 @@ function drawExchanges() {
 function showExchange(e) {
   const steps = e.donors.map((d, i) => el('li', {}, `${d} gives to `, patientButton(e.patients[i])));
   $('#why').replaceChildren(
-    el('p', {}, `${e.id} is a ${e.kind} of ${e.patients.length} in ${state.run}. Select a patient to see the graph evidence.`),
+    el('p', {}, `${e.id} is a ${e.kind === 'cycle' ? 'loop' : 'chain'} of ${e.patients.length} in ${state.run}. Select a patient to see why they were matched.`),
     figure(exchangeSvg(e), e.kind === 'chain' ? 'An altruistic donor (dashed) starts the chain.' : 'Each pair\'s donor gives to the next patient.'),
     el('ol', { class: 'steps' }, steps),
   );
+  $('#why svg').classList.add('draw');
+  freshen($('#why'));
   state.selected = e.id;
   drawExchanges();
   revealInspector();
@@ -127,16 +157,21 @@ const figure = (svg, caption) => el('figure', {}, svg, el('figcaption', { class:
 
 // marks: Map of node id to a CSS class ('focus' for the patient being explained,
 // 'served' for a patient another exchange already serves).
-function exchangeSvg(e, marks = new Map()) {
+const CARD = { w: 220, h: 92, r: 15, ringX: 44, ringY: 30, donorLabels: false };
+const HERO = { w: 300, h: 230, r: 26, ringX: 92, ringY: 80, donorLabels: true };
+
+function exchangeSvg(e, marks = new Map(), layout = CARD) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   const nodes = e.kind === 'chain' ? [e.donors[0], ...e.patients] : [...e.patients];
-  const w = 220, h = 92, r = 15;
+  const { w, h, r } = layout;
   const pos = nodes.map((_, i) => {
     if (e.kind === 'chain') return [r + 4 + (i * (w - 2 * r - 8)) / Math.max(nodes.length - 1, 1), h / 2];
     const a = (2 * Math.PI * i) / nodes.length - Math.PI / 2;
-    return [w / 2 + 34 * Math.cos(a) * (nodes.length === 2 ? 1.6 : 1.3), h / 2 + 30 * Math.sin(a)];
+    const stretch = nodes.length === 2 ? 1.25 : 1;
+    return [w / 2 + layout.ringX * stretch * Math.cos(a), h / 2 + layout.ringY * Math.sin(a) + (nodes.length === 3 ? layout.ringY * 0.18 : 0)];
   });
+  if (layout === HERO) svg.classList.add('hero-svg');
   svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label', e.donors
@@ -151,12 +186,17 @@ function exchangeSvg(e, marks = new Map()) {
   const edges = e.kind === 'chain'
     ? e.patients.map((_, i) => [i, i + 1])
     : e.patients.map((_, i) => [(i - 1 + nodes.length) % nodes.length, i]);
-  for (const [a, b] of edges) {
+  edges.forEach(([a, b], k) => {
     const [x1, y1] = pos[a], [x2, y2] = pos[b];
     const len = Math.hypot(x2 - x1, y2 - y1) || 1;
     const ux = (x2 - x1) / len, uy = (y2 - y1) / len;
     add('line', { x1: x1 + ux * r, y1: y1 + uy * r, x2: x2 - ux * (r + 4), y2: y2 - uy * (r + 4), class: 'edge', 'marker-end': 'url(#arrow)' });
-  }
+    if (layout.donorLabels && e.donors) {
+      const giver = e.kind === 'chain' ? e.donors[k] : e.donors[b];
+      const mx = (x1 + x2) / 2 - uy * 14, my = (y1 + y2) / 2 + ux * 14;
+      add('text', { x: mx, y: my + 4, class: 'donor-label' }, giver.replace(/^D0*/, 'D'));
+    }
+  });
   nodes.forEach((id, i) => {
     add('circle', { cx: pos[i][0], cy: pos[i][1], r, class: `node ${id.startsWith('N') ? 'altruist' : ''} ${marks.get(id) ?? ''}` });
     add('text', { x: pos[i][0], y: pos[i][1] + 3.5, class: 'label' }, id.replace(/^P0*/, 'P').replace(/^N0*/, 'N'));
@@ -175,6 +215,8 @@ async function explain(id) {
   }
   const { lines, figures } = await whyLines(id, profile);
   out.replaceChildren(...lines.map((l) => el('p', {}, l)), ...figures);
+  out.querySelectorAll('svg').forEach((svg) => svg.classList.add('draw'));
+  freshen(out);
   revealInspector();
 }
 

@@ -67,7 +67,7 @@ Not matched in R1.
 Antibody hits among them: A2 (19 donors), DR14 (19 donors), DR12 (16 donors), B51 (15 donors), DR4 (13 donors).
 9 donors can give to P071 (0 altruistic).
 18 cycles of up to 3 pairs pass through P071.
-Reason: every one of those cycles needs a patient the plan already serves, e.g. P246 in R1-X48; P219 in R1-X44; P120 in R1-X31; P115 in R1-X30; P052 in R1-X6.
+Reason: every one of those cycles needs a patient the plan already serves, e.g. P246 in R1-X44; P219 in R1-X42; P120 in R1-X28; P115 in R1-X41; P052 in R1-X26.
 ```
 
 ```bash
@@ -80,19 +80,19 @@ kx match                    # solve again and record a new MatchRun
 ```text
 If D085 withdraws from R1:
   P085 leaves the exchange with their donor
-  R1-X18 breaks (cycle of 3: P011, P033, P085)
-  waiting on D085 or a donor after it: P011, P033
+  R1-X33 breaks (cycle of 3: P085, P248, P157)
+  waiting on D085 or a donor after it: P248, P157
   re-plan: 193 -> 192 patients matched
   lose a kidney: none
   newly matched: none
   (rolled back; the store is unchanged)
 ```
 
-A paired donor who withdraws takes their patient out of the exchange, because that patient no longer brings a kidney to trade. The re-plan uses the latest run's cycle and chain limits. Here P011 and P033 find other exchanges, so the plan loses only P085.
+A paired donor who withdraws takes their patient out of the exchange, because that patient no longer brings a kidney to trade. The re-plan uses the latest run's cycle and chain limits. Here P248 and P157 find other exchanges, so the plan loses only P085.
 
 Patient and donor ids are case-insensitive. `kx match` and `kx whatif` print each stage and its time to stderr while they run. They took 30 to 60 seconds on the author's Windows laptop for the 300-pair pool. Most of that time goes to cycle enumeration in Cypher and the exact integer program. `kx why` answers in under a second.
 
-To rebuild the store from scratch, install the relate CLI ([install guide](https://relatedb.ai/docs/get-started/install)) and run `kx build` (seed 42, 300 pairs, 10 altruistic donors), then `kx match`. `kx build` with the same seed writes a byte-identical `graph.json`. `kx match` then adds a `MatchRun` whose `created_at` is the time of the run. `kx build` refuses to replace a folder that is not a Relate store.
+To rebuild the store from scratch, install the relate CLI ([install guide](https://relatedb.ai/docs/get-started/install)) and run `kx build` (seed 42, 300 pairs, 10 altruistic donors), then `kx match`. `kx build` with the same seed writes a byte-identical `graph.json`. `kx match` then adds a `MatchRun` whose `created_at` is the time of the run, and it picks the same exchanges every time for the same pool: when several plans tie, the solver's input order is fixed, so the choice does not depend on row order or Python's hash seed. `kx build` refuses to replace a folder that is not a Relate store.
 
 ### Web explorer
 
@@ -130,7 +130,7 @@ The compatibility rules are simplified: ABO blood type plus a synthetic antibody
 ## Testing and QA
 
 ```bash
-pytest -m "not qa_full"       # 208 tests, about 20 s
+pytest -m "not qa_full"       # 229 tests, about 35 s
 pytest -m qa_full             # the committed 300-pair store, about 2 min
 python scripts/mutation_check.py
 ```
@@ -139,7 +139,7 @@ python scripts/mutation_check.py
 - **Solver against brute force.** On 150 random small pools the solver's plan obeys every rule and equals the optimum of an independent exhaustive search.
 - **Cypher against reference.** Cycles found by Cypher equal cycles found by an independent Python search on generated pools.
 - **End-to-end QA** (`tests/qa`). The real CLI runs on a fresh store. Tests cover reproducible builds, the relate CLI reading what Python wrote, a recorded run that obeys every rule with no unused cycle or altruist left, read-only commands and what-if leaving the store files unchanged, error exits, the MCP server, and the web page running the same Cypher as the CLI.
-- **Mutation check.** `scripts/mutation_check.py` plants six known bugs one at a time and confirms the suite fails on each.
+- **Mutation check.** `scripts/mutation_check.py` plants eight known bugs one at a time, including a plan that changes with row order or Python's hash seed, and confirms the suite fails on each.
 
 [docs/QA.md](docs/QA.md) lists the browser checks done by hand on the web explorer.
 
