@@ -35,7 +35,7 @@ const el = (tag, attrs = {}, ...children) => {
   return node;
 };
 
-const state = { snapshot: null, run: null, exchanges: [], holder: new Map(), giver: new Map(), withdrawn: null };
+const state = { snapshot: null, run: null, exchanges: [], holder: new Map(), giver: new Map(), withdrawn: null, filter: 'all' };
 
 async function load() {
   $('#status').textContent = 'Loading graph.json into Relate (WebAssembly)…';
@@ -77,11 +77,13 @@ const stat = (value, label) => el('div', { class: 'stat' }, el('strong', {}, Str
 
 function drawExchanges() {
   const broken = state.withdrawn ? new Set(state.withdrawn.broken) : new Set();
+  const shown = state.exchanges.filter((e) => state.filter === 'all' || e.kind === state.filter);
+  $('#exchange-count').textContent = `${shown.length} of ${state.exchanges.length}`;
   $('#exchanges').replaceChildren(
-    ...state.exchanges.map((e) =>
+    ...shown.map((e) =>
       el(
         'button',
-        { class: `exchange ${broken.has(e.id) ? 'broken' : ''}`, onclick: () => explain(e.patients[0]), title: `Explain ${e.patients[0]}` },
+        { class: `exchange ${broken.has(e.id) ? 'broken' : ''}`, onclick: () => showExchange(e), 'aria-label': `Show ${e.id}, ${e.kind} of ${e.patients.length}` },
         el('span', { class: 'ex-id' }, `${e.id} · ${e.kind} of ${e.patients.length}`),
         exchangeSvg(e),
       ),
@@ -89,10 +91,25 @@ function drawExchanges() {
   );
 }
 
-function exchangeSvg(e) {
+function showExchange(e) {
+  const steps = e.donors.map((d, i) => el('li', {}, `${d} gives to `, patientButton(e.patients[i])));
+  $('#why').replaceChildren(
+    el('p', {}, `${e.id} is a ${e.kind} of ${e.patients.length} in ${state.run}. Select a patient to see the graph evidence.`),
+    figure(exchangeSvg(e), e.kind === 'chain' ? 'An altruistic donor (dashed) starts the chain.' : 'Each pair\'s donor gives to the next patient.'),
+    el('ol', { class: 'steps' }, steps),
+  );
+  $('#why-h').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+const patientButton = (id) => el('button', { class: 'link', type: 'button', onclick: () => explain(id) }, id);
+const figure = (svg, caption) => el('figure', {}, svg, el('figcaption', { class: 'muted' }, caption));
+
+// marks: Map of node id to a CSS class ('focus' for the patient being explained,
+// 'served' for a patient another exchange already serves).
+function exchangeSvg(e, marks = new Map()) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
-  const nodes = e.kind === 'chain' ? [e.donors[0], ...e.patients] : e.patients;
+  const nodes = e.kind === 'chain' ? [e.donors[0], ...e.patients] : [...e.patients];
   const w = 220, h = 92, r = 15;
   const pos = nodes.map((_, i) => {
     if (e.kind === 'chain') return [r + 4 + (i * (w - 2 * r - 8)) / Math.max(nodes.length - 1, 1), h / 2];
@@ -101,7 +118,9 @@ function exchangeSvg(e) {
   });
   svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', `${e.kind}: ${e.donors.map((d, i) => `${d} gives to ${e.patients[i]}`).join(', ')}`);
+  svg.setAttribute('aria-label', e.donors
+    ? `${e.kind}: ${e.donors.map((d, i) => `${d} gives to ${e.patients[i]}`).join(', ')}`
+    : `${e.kind} through ${e.patients.join(', ')}`);
   const add = (tag, attrs, text) => {
     const n = document.createElementNS(ns, tag);
     for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
@@ -118,7 +137,7 @@ function exchangeSvg(e) {
     add('line', { x1: x1 + ux * r, y1: y1 + uy * r, x2: x2 - ux * (r + 4), y2: y2 - uy * (r + 4), class: 'edge', 'marker-end': 'url(#arrow)' });
   }
   nodes.forEach((id, i) => {
-    add('circle', { cx: pos[i][0], cy: pos[i][1], r, class: id.startsWith('N') ? 'node altruist' : 'node' });
+    add('circle', { cx: pos[i][0], cy: pos[i][1], r, class: `node ${id.startsWith('N') ? 'altruist' : ''} ${marks.get(id) ?? ''}` });
     add('text', { x: pos[i][0], y: pos[i][1] + 3.5, class: 'label' }, id.replace(/^P0*/, 'P').replace(/^N0*/, 'N'));
   });
   return svg;
@@ -133,16 +152,21 @@ async function explain(id) {
     out.replaceChildren(el('p', { class: 'warn' }, `No patient ${id}.`));
     return;
   }
-  out.replaceChildren(...(await whyLines(id, profile)).map((l) => el('p', {}, l)));
+  const { lines, figures } = await whyLines(id, profile);
+  out.replaceChildren(...lines.map((l) => el('p', {}, l)), ...figures);
 }
 
 // Mirrors render() in src/kidneyloop/explain.py line for line, so `kx why` and the page agree.
+// figures add the graph picture the CLI cannot show; they never change the text.
 async function whyLines(id, profile) {
   const lines = [`${id}: blood type ${profile.blood}, cPRA ${Math.round(profile.cpra * 100)}% of pool donors ruled out by antibodies`];
+  const figures = [];
+  const done = () => ({ lines, figures });
   const ex = state.exchanges.find((e) => e.patients.includes(id));
   if (ex) {
     lines.push(`Matched in ${state.run} by ${ex.id} (${ex.kind} of ${ex.patients.length}): ${ex.donors.map((d, i) => `${d} -> ${ex.patients[i]}`).join(', ')}`);
-    return lines;
+    figures.push(figure(exchangeSvg(ex, new Map([[id, 'focus']])), `${id} (highlighted) in ${ex.id}.`));
+    return done();
   }
   const [abo] = await rows(Q.ABO_DONORS, { id });
   const antigens = await rows(Q.BLOCKING_ANTIGENS, { id });
@@ -153,11 +177,11 @@ async function whyLines(id, profile) {
   lines.push(`${incoming.n} donors can give to ${id} (${incoming.altruistic ?? 0} altruistic).`);
   if (incoming.n === 0) {
     lines.push(`Reason: ${abo.n === 0 ? 'no donor has a compatible blood type' : 'every blood-compatible donor carries an antigen the patient has antibodies to'}.`);
-    return lines;
+    return done();
   }
   if (profile.own_donor && profile.own_donor_can_give === 0) {
     lines.push(`Reason: own donor ${profile.own_donor} can give to nobody in the pool, so ${id} can only be the last patient of a chain.`);
-    return lines;
+    return done();
   }
   const altruists = (await rows(Q.ALTRUISTS_FOR, { id })).map((r) => r.id);
   if (altruists.length) {
@@ -175,7 +199,12 @@ async function whyLines(id, profile) {
   } else {
     lines.push('Reason: no cycle closes back to this pair, and no chain reached it in the chosen plan.');
   }
-  return lines;
+  for (const c of cycles.slice(0, 2)) {
+    const marks = new Map([[id, 'focus'], ...c.slice(1).filter((p) => takenBy.has(p)).map((p) => [p, 'served'])]);
+    const blockers = c.slice(1).filter((p) => takenBy.has(p)).map((p) => `${p} is served by ${takenBy.get(p)}`);
+    figures.push(figure(exchangeSvg({ kind: 'cycle', patients: c }, marks), blockers.length ? `A cycle that could serve ${id}, blocked: ${blockers.join('; ')}.` : `A cycle that could serve ${id}.`));
+  }
+  return done();
 }
 
 async function withdraw(id) {
@@ -228,5 +257,12 @@ $('#why-form').addEventListener('submit', (ev) => { ev.preventDefault(); explain
 $('#whatif-form').addEventListener('submit', (ev) => { ev.preventDefault(); withdraw($('#donor').value); });
 $('#reset').addEventListener('click', () => { $('#whatif-out').replaceChildren(); load(); });
 $('#console-form').addEventListener('submit', (ev) => { ev.preventDefault(); runConsole(); });
+for (const chip of document.querySelectorAll('[data-filter]')) {
+  chip.addEventListener('click', () => {
+    state.filter = chip.dataset.filter;
+    for (const c of document.querySelectorAll('[data-filter]')) c.setAttribute('aria-pressed', String(c === chip));
+    drawExchanges();
+  });
+}
 
 load().catch((err) => { $('#status').textContent = `Could not load the graph: ${err.message}`; $('#status').classList.add('warn'); });

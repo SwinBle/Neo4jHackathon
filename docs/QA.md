@@ -14,6 +14,10 @@ Automated checks run with `pytest` and `scripts/mutation_check.py`. See the READ
 | Withdraw unknown D999 | "No donor D999 in this tab's graph." |
 | Reload graph | Restores the withdrawn donor |
 | Cypher console with a syntax error | Shows the engine's parse error, page keeps working |
+| Filter chips All / Cycles / Chains | Chains shows 10 of 67 exchanges; All restores 67 |
+| Select an exchange card | Detail lists each donor to patient step; each patient opens their explanation |
+| Explain a matched patient | Their exchange is drawn with the patient highlighted |
+| Explain P071 (unmatched) | Two candidate cycles drawn; P246, P219 and P120 marked as served, captions name their exchanges |
 | Phone width 375 px | No horizontal scroll, all 68 exchange cards render |
 | Dark mode | Text and buttons readable; button text uses a dark colour on the light accent |
 

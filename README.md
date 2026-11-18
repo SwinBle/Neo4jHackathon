@@ -90,7 +90,7 @@ If D085 withdraws from R1:
 
 A paired donor who withdraws takes their patient out of the exchange, because that patient no longer brings a kidney to trade. The re-plan uses the latest run's cycle and chain limits. Here P011 and P033 find other exchanges, so the plan loses only P085.
 
-Patient and donor ids are case-insensitive. `kx match` and `kx whatif` took 30 to 60 seconds on the author's Windows laptop for the 300-pair pool. Most of that time goes to cycle enumeration in Cypher and the exact integer program. `kx why` answers in under a second.
+Patient and donor ids are case-insensitive. `kx match` and `kx whatif` print each stage and its time to stderr while they run. They took 30 to 60 seconds on the author's Windows laptop for the 300-pair pool. Most of that time goes to cycle enumeration in Cypher and the exact integer program. `kx why` answers in under a second.
 
 To rebuild the store from scratch, install the relate CLI ([install guide](https://relatedb.ai/docs/get-started/install)) and run `kx build` (seed 42, 300 pairs, 10 altruistic donors), then `kx match`. `kx build` with the same seed writes a byte-identical `graph.json`. `kx match` then adds a `MatchRun` whose `created_at` is the time of the run. `kx build` refuses to replace a folder that is not a Relate store.
 
@@ -100,7 +100,7 @@ To rebuild the store from scratch, install the relate CLI ([install guide](https
 python -m http.server 8000
 ```
 
-Open <http://localhost:8000/web/>. The page loads `data/kidneyloop/graph.json` into Relate's WebAssembly build in a worker. It shows the latest run as cycle and chain diagrams, explains any patient, withdraws a donor in the tab's copy, and has a Cypher console. The browser has no solver, so the page shows what breaks and points to `kx whatif` for the re-plan.
+Open <http://localhost:8000/web/>. The page loads `data/kidneyloop/graph.json` into Relate's WebAssembly build in a worker. It shows the latest run as cycle and chain diagrams you can filter and open. It explains any patient with the same text as `kx why`, plus a drawing of the cycles that could serve them, with the patient highlighted and the blocking patients marked. It can withdraw a donor in the tab's copy, and it has a Cypher console. The browser has no solver, so the page shows what breaks and points to `kx whatif` for the re-plan.
 
 ### Agents over MCP
 

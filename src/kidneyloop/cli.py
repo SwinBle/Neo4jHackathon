@@ -41,6 +41,10 @@ def open_store(store: Path, read_only: bool) -> Iterator[relate.Connection]:
         yield conn
 
 
+def progress(line: str) -> None:
+    typer.echo(f"  - {line}", err=True)
+
+
 def check_cycle_limit(max_cycle: int) -> None:
     if not 2 <= max_cycle <= 3:
         raise fail("--max-cycle must be 2 or 3.", 2)
@@ -96,7 +100,7 @@ def match(store: Path = DEFAULT_STORE, max_cycle: int = 3, max_chain: int = 4) -
     if max_chain < 0:
         raise fail("--max-chain must be at least 0.", 2)
     with open_store(store, read_only=False) as conn:
-        run = run_match(conn, max_cycle, max_chain)
+        run = run_match(conn, max_cycle, max_chain, progress)
         patients = conn.execute("MATCH (p:Patient) RETURN count(p) AS n").single()["n"]
     cycles = [e for e in run.plan.exchanges if e.kind == "cycle"]
     chains = [e for e in run.plan.exchanges if e.kind == "chain"]
@@ -122,7 +126,7 @@ def whatif(withdraw: str = typer.Option(..., help="Donor id to withdraw"), store
     """Re-plan as if a donor withdrew, inside a transaction that is rolled back."""
     with open_store(store, read_only=False) as conn:
         try:
-            result = withdraw_donor(conn, withdraw.strip().upper())
+            result = withdraw_donor(conn, withdraw.strip().upper(), progress)
         except (KeyError, LookupError) as e:
             raise fail(str(e.args[0]), 1)
     typer.echo(f"If {result.donor} withdraws from {result.run}:")

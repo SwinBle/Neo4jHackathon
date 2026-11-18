@@ -1,5 +1,7 @@
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Callable
 
 import relate
 
@@ -47,18 +49,41 @@ class RunSummary:
     candidate_arcs: int
 
 
-def read_inputs(conn: relate.Connection, max_cycle: int = 3) -> MatchInputs:
+Progress = Callable[[str], None]
+
+
+def _quiet(_: str) -> None:
+    pass
+
+
+def read_inputs(conn: relate.Connection, max_cycle: int = 3, progress: Progress = _quiet) -> MatchInputs:
     patients = list(conn.execute(PATIENTS))
     max_wait = max((p["wait_days"] for p in patients), default=0)
     weight = {p["id"]: patient_weight(p["cpra"], p["wait_days"], max_wait, len(patients)) for p in patients}
     donor_of = {row["patient"]: row["donor"] for row in conn.execute(PAIRS)}
-    return MatchInputs(tuple(find_cycles(conn, max_cycle)), tuple(find_arcs(conn)), donor_of, weight)
+    started = time.perf_counter()
+    cycles = tuple(find_cycles(conn, max_cycle))
+    arcs = tuple(find_arcs(conn))
+    progress(f"Cypher found {len(cycles):,} cycles and {len(arcs):,} arcs in {time.perf_counter() - started:.1f} s")
+    return MatchInputs(cycles, arcs, donor_of, weight)
 
 
-def run_match(conn: relate.Connection, max_cycle: int = 3, max_chain: int = 4) -> RunSummary:
-    """Solve the current pool and record the chosen exchanges as a new MatchRun."""
-    inputs = read_inputs(conn, max_cycle)
+def solve_with_progress(inputs: MatchInputs, max_chain: int, progress: Progress = _quiet) -> Plan:
+    progress("Solving the integer program (exact, HiGHS)...")
+    started = time.perf_counter()
     plan = solve(inputs, max_chain)
+    progress(f"Solved: {plan.transplants} transplants in {time.perf_counter() - started:.1f} s")
+    return plan
+
+
+def run_match(conn: relate.Connection, max_cycle: int = 3, max_chain: int = 4, progress: Progress = _quiet) -> RunSummary:
+    """Solve the current pool and record the chosen exchanges as a new MatchRun.
+
+    progress receives one line per stage, since a 300-pair round takes tens of seconds.
+    """
+    progress("Enumerating cycles in Cypher...")
+    inputs = read_inputs(conn, max_cycle, progress)
+    plan = solve_with_progress(inputs, max_chain, progress)
     seq = conn.execute(NEXT_SEQ).single()["seq"]
     run_id = f"R{seq}"
     conn.execute(

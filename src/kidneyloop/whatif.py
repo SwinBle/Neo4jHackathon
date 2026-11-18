@@ -3,8 +3,8 @@ from dataclasses import dataclass
 import relate
 
 from .exchanges import Exchange
-from .runs import latest_run_id, read_inputs, run_exchanges
-from .solver import MatchInputs, Plan, solve
+from .runs import Progress, _quiet, latest_run_id, read_inputs, run_exchanges, solve_with_progress
+from .solver import MatchInputs, Plan
 
 # A paired donor who withdraws takes their patient out of the exchange with them:
 # the patient no longer brings a kidney to trade.
@@ -54,7 +54,7 @@ class WhatIf:
         return self.after - self.before
 
 
-def withdraw_donor(conn: relate.Connection, donor_id: str) -> WhatIf:
+def withdraw_donor(conn: relate.Connection, donor_id: str, progress: Progress = _quiet) -> WhatIf:
     """Re-plan the latest run as if the donor had withdrawn, then roll the withdrawal back.
 
     The re-plan uses the latest run's cycle and chain limits. The deletion and the
@@ -75,8 +75,9 @@ def withdraw_donor(conn: relate.Connection, donor_id: str) -> WhatIf:
     conn.autocommit = False
     try:
         leaving = conn.execute(WITHDRAW, {"id": donor_id}).single()["leaving"]
-        inputs = read_inputs(conn, limits["max_cycle"])
-        replan = solve(inputs, limits["max_chain"])
+        progress(f"Withdrew {donor_id} inside a transaction; re-enumerating cycles...")
+        inputs = read_inputs(conn, limits["max_cycle"], progress)
+        replan = solve_with_progress(inputs, limits["max_chain"], progress)
     finally:
         conn.rollback()
         conn.autocommit = previous

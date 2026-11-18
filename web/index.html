@@ -52,6 +52,19 @@ button.secondary { background: transparent; color: var(--ink); border-color: var
 table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 6px; display: block; overflow-x: auto; }
 th, td { border-bottom: 1px solid var(--line); padding: 4px 8px; text-align: left; white-space: nowrap; }
 code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.node.focus { fill: var(--accent); }
+.node.focus + .label, .node.served + .label { font-weight: 700; }
+.node.served { fill: var(--broken); stroke: var(--warn); }
+.how { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; padding: 0; margin: 0; list-style: none; counter-reset: step; }
+.how li { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px 10px 40px; position: relative; font-size: 14px; }
+.how li::before { counter-increment: step; content: counter(step); position: absolute; left: 12px; top: 10px; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 12px; text-align: center; line-height: 20px; }
+.chips { display: flex; gap: 8px; align-items: center; margin: 8px 0 12px; flex-wrap: wrap; }
+.chip { font: inherit; font-size: 13px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+figure { margin: 10px 0 0; max-width: 320px; }
+figcaption { margin-top: 2px; }
+.steps { margin: 8px 0 0; padding-left: 20px; }
+button.link { font: inherit; color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -64,6 +77,16 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
   </header>
 
   <svg width="0" height="0" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs></svg>
+
+  <section aria-labelledby="how-h">
+    <h2 id="how-h">How it works</h2>
+    <ol class="how">
+      <li><strong>Rules are graph data.</strong> Blood types and antibody-to-antigen links are nodes and relationships, so Cypher derives who can give to whom.</li>
+      <li><strong>Cypher finds the cycles.</strong> Every 2-way and 3-way exchange is a path that closes on itself.</li>
+      <li><strong>An exact solver picks the plan.</strong> It builds chains from the compatible arcs and writes the chosen exchanges back as a MatchRun.</li>
+      <li><strong>Every answer is a path.</strong> Ask why a patient was matched or missed, and see the cycle and who blocks it.</li>
+    </ol>
+  </section>
 
   <section aria-labelledby="run-h">
     <h2 id="run-h">Latest matching run</h2>
@@ -95,7 +118,13 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 
   <section aria-labelledby="ex-h">
     <h2 id="ex-h">Chosen exchanges</h2>
-    <p class="muted">Each arrow is a donor giving to the next patient. Dashed circles are altruistic donors who start a chain. Select one to explain its first patient.</p>
+    <p class="muted">Each arrow is a donor giving to the next patient. Dashed circles are altruistic donors who start a chain. Select an exchange to see who gives to whom.</p>
+    <div class="chips" role="group" aria-label="Show exchanges">
+      <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="chip" data-filter="cycle" aria-pressed="false">Cycles</button>
+      <button type="button" class="chip" data-filter="chain" aria-pressed="false">Chains</button>
+      <span id="exchange-count" class="muted"></span>
+    </div>
     <div id="exchanges" class="grid"></div>
   </section>
 
