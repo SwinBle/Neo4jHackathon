@@ -8,7 +8,10 @@ import typer
 from .exchanges import find_arcs, find_cycles
 from .explain import explain, render
 from .generator import generate_pool
+from .policy import DEFAULT_POLICY_FILE, Policy, PolicyError, load_policy
 from .runs import run_match
+from .simulate import render as render_simulation, simulate as simulate_plans
+from .solver import OBJECTIVES, Objective
 from .store import create_json_store, derive, load_pool
 from .whatif import withdraw_donor
 
@@ -48,6 +51,15 @@ def progress(line: str) -> None:
 def check_cycle_limit(max_cycle: int) -> None:
     if not 2 <= max_cycle <= 3:
         raise fail("--max-cycle must be 2 or 3.", 2)
+
+
+def read_policy(path: Path) -> Policy:
+    try:
+        return load_policy(path)
+    except OSError as e:
+        raise fail(f"cannot read policy {path}: {e.strerror}", 2)
+    except PolicyError as e:
+        raise fail(f"bad policy {path}: {e}", 2)
 
 
 @app.command()
@@ -93,20 +105,55 @@ def options(store: Path = DEFAULT_STORE, max_cycle: int = 3) -> None:
     typer.echo(f"altruistic arcs: {sum(a.altruistic for a in arcs)}, pair arcs: {sum(not a.altruistic for a in arcs)}")
 
 
+def check_objective(objective: str) -> Objective:
+    if objective not in OBJECTIVES:
+        raise fail(f"--objective must be one of {', '.join(OBJECTIVES)}.", 2)
+    return objective  # type: ignore[return-value]
+
+
 @app.command()
-def match(store: Path = DEFAULT_STORE, max_cycle: int = 3, max_chain: int = 4) -> None:
+def match(
+    store: Path = DEFAULT_STORE,
+    max_cycle: int = 3,
+    max_chain: int = 4,
+    policy: Path = typer.Option(DEFAULT_POLICY_FILE, help="Policy JSON file"),
+    objective: str = typer.Option("count", help="count: max transplants; expected: max expected transplants"),
+) -> None:
     """Choose disjoint cycles and chains and record them as a new MatchRun."""
     check_cycle_limit(max_cycle)
     if max_chain < 0:
         raise fail("--max-chain must be at least 0.", 2)
+    goal = check_objective(objective)
+    rules = read_policy(policy)
     with open_store(store, read_only=False) as conn:
-        run = run_match(conn, max_cycle, max_chain, progress)
+        run = run_match(conn, max_cycle, max_chain, progress, rules, goal)
         patients = conn.execute("MATCH (p:Patient) RETURN count(p) AS n").single()["n"]
     cycles = [e for e in run.plan.exchanges if e.kind == "cycle"]
     chains = [e for e in run.plan.exchanges if e.kind == "chain"]
-    typer.echo(f"{run.id}: {run.plan.transplants} transplants for {patients} patients")
+    typer.echo(f"{run.id}: {run.plan.transplants} transplants for {patients} patients ({goal} objective, policy {rules.name})")
     typer.echo(f"  from {run.candidate_cycles} candidate cycles and {run.candidate_arcs} arcs")
     typer.echo(f"  {len(cycles)} cycles, {len(chains)} chains, {patients - len(run.plan.matched_patients)} patients unmatched")
+    typer.echo(f"  {run.expected_transplants:.1f} expected transplants under the policy's success model")
+
+
+@app.command()
+def simulate(
+    trials: int = 1000,
+    seed: int = 42,
+    store: Path = DEFAULT_STORE,
+    max_cycle: int = 3,
+    max_chain: int = 4,
+    policy: Path = typer.Option(DEFAULT_POLICY_FILE, help="Policy JSON file"),
+) -> None:
+    """Compare the count and expected plans on the same sampled transplant outcomes (read-only)."""
+    check_cycle_limit(max_cycle)
+    if trials < 2 or max_chain < 0:
+        raise fail("--trials must be at least 2 and --max-chain at least 0.", 2)
+    rules = read_policy(policy)
+    with open_store(store, read_only=True) as conn:
+        result = simulate_plans(conn, rules, trials, seed, max_cycle, max_chain, progress)
+    for line in render_simulation(result):
+        typer.echo(line)
 
 
 @app.command()

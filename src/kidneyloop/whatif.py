@@ -134,4 +134,5 @@ def _without(inputs: MatchInputs, kept: list[Exchange]) -> MatchInputs:
         arcs=tuple(a for a in inputs.arcs if a.patient not in patients and a.donor not in donors),
         donor_of={p: d for p, d in inputs.donor_of.items() if p not in patients and d not in donors},
         weight=inputs.weight,
+        success=inputs.success,
     )

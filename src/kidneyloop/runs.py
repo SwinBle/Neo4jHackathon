@@ -6,18 +6,29 @@ from typing import Callable
 import relate
 
 from .exchanges import Exchange, find_arcs, find_cycles
-from .solver import MatchInputs, Plan, patient_weight, solve
+from .policy import PatientFacts, Policy, PoolFacts, load_policy
+from .solver import MatchInputs, Objective, Plan, expected_transplants, patient_weight, solve
 
-OBJECTIVE = "max transplants; tie-break 0.7 x pool PRA + 0.3 x wait share"
+OBJECTIVE_TEXT: dict[Objective, str] = {
+    "count": "max transplants",
+    "expected": "max expected transplants (a cycle needs every transplant; a chain stops at its first failure)",
+}
 SOLVER = "HiGHS via scipy.optimize.milp"
 
-PATIENTS = "MATCH (p:Patient) RETURN p.id AS id, p.pool_pra AS pool_pra, p.wait_days AS wait_days"
+PATIENTS = """
+MATCH (p:Patient)-[:HAS_BLOOD]->(b:BloodType)
+OPTIONAL MATCH (d:Donor)-[:PAIRED_WITH]->(p)
+OPTIONAL MATCH (d)-[:HAS_BLOOD]->(db:BloodType)
+RETURN p.id AS id, p.pool_pra AS pool_pra, p.wait_days AS wait_days, b.name AS blood, db.name AS donor_blood
+"""
 PAIRS = "MATCH (d:Donor)-[:PAIRED_WITH]->(p:Patient) RETURN d.id AS donor, p.id AS patient"
 
 NEXT_SEQ = "OPTIONAL MATCH (r:MatchRun) RETURN coalesce(max(r.seq), 0) + 1 AS seq"
 CREATE_RUN = """
 CREATE (r:MatchRun {id: $id, seq: $seq, created_at: $created_at, objective: $objective, solver: $solver,
+                    policy: $policy, policy_sha256: $policy_sha256,
                     max_cycle: $max_cycle, max_chain: $max_chain, transplants: $transplants,
+                    expected_transplants: $expected_transplants,
                     candidate_cycles: $candidate_cycles, candidate_arcs: $candidate_arcs})
 WITH r
 UNWIND $exchanges AS ex
@@ -47,6 +58,7 @@ class RunSummary:
     plan: Plan
     candidate_cycles: int
     candidate_arcs: int
+    expected_transplants: float
 
 
 Progress = Callable[[str], None]
@@ -56,34 +68,54 @@ def _quiet(_: str) -> None:
     pass
 
 
-def read_inputs(conn: relate.Connection, max_cycle: int = 3, progress: Progress = _quiet) -> MatchInputs:
+def read_inputs(
+    conn: relate.Connection, max_cycle: int = 3, progress: Progress = _quiet, policy: Policy | None = None
+) -> MatchInputs:
+    policy = policy or load_policy()
     patients = list(conn.execute(PATIENTS))
-    max_wait = max((p["wait_days"] for p in patients), default=0)
-    weight = {p["id"]: patient_weight(p["pool_pra"], p["wait_days"], max_wait, len(patients)) for p in patients}
+    pool = PoolFacts(max_wait=max((p["wait_days"] for p in patients), default=0))
+    weight = {
+        p["id"]: patient_weight(
+            policy.tie(PatientFacts(p["pool_pra"], p["wait_days"], p["blood"], p["donor_blood"]), pool), len(patients)
+        )
+        for p in patients
+    }
+    success = {p["id"]: policy.success.probability(p["pool_pra"]) for p in patients}
     donor_of = {row["patient"]: row["donor"] for row in conn.execute(PAIRS)}
     started = time.perf_counter()
     cycles = tuple(find_cycles(conn, max_cycle))
     arcs = tuple(find_arcs(conn))
     progress(f"Cypher found {len(cycles):,} cycles and {len(arcs):,} arcs in {time.perf_counter() - started:.1f} s")
-    return MatchInputs(cycles, arcs, donor_of, weight)
+    return MatchInputs(cycles, arcs, donor_of, weight, success)
 
 
-def solve_with_progress(inputs: MatchInputs, max_chain: int, progress: Progress = _quiet) -> Plan:
-    progress("Solving the integer program (exact, HiGHS)...")
+def solve_with_progress(
+    inputs: MatchInputs, max_chain: int, progress: Progress = _quiet, objective: Objective = "count"
+) -> Plan:
+    progress(f"Solving the integer program for {objective} (exact, HiGHS)...")
     started = time.perf_counter()
-    plan = solve(inputs, max_chain)
+    plan = solve(inputs, max_chain, objective)
     progress(f"Solved: {plan.transplants} transplants in {time.perf_counter() - started:.1f} s")
     return plan
 
 
-def run_match(conn: relate.Connection, max_cycle: int = 3, max_chain: int = 4, progress: Progress = _quiet) -> RunSummary:
+def run_match(
+    conn: relate.Connection,
+    max_cycle: int = 3,
+    max_chain: int = 4,
+    progress: Progress = _quiet,
+    policy: Policy | None = None,
+    objective: Objective = "count",
+) -> RunSummary:
     """Solve the current pool and record the chosen exchanges as a new MatchRun.
 
     progress receives one line per stage, since a 300-pair round takes tens of seconds.
     """
+    policy = policy or load_policy()
     progress("Enumerating cycles in Cypher...")
-    inputs = read_inputs(conn, max_cycle, progress)
-    plan = solve_with_progress(inputs, max_chain, progress)
+    inputs = read_inputs(conn, max_cycle, progress, policy)
+    plan = solve_with_progress(inputs, max_chain, progress, objective)
+    expected = expected_transplants(plan, inputs.success)
     seq = conn.execute(NEXT_SEQ).single()["seq"]
     run_id = f"R{seq}"
     conn.execute(
@@ -92,7 +124,10 @@ def run_match(conn: relate.Connection, max_cycle: int = 3, max_chain: int = 4, p
             "id": run_id,
             "seq": seq,
             "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "objective": OBJECTIVE,
+            "objective": f"{OBJECTIVE_TEXT[objective]}; tie-break from policy {policy.name}",
+            "policy": policy.name,
+            "policy_sha256": policy.sha256,
+            "expected_transplants": expected,
             "solver": SOLVER,
             "max_cycle": max_cycle,
             "max_chain": max_chain,
@@ -105,7 +140,7 @@ def run_match(conn: relate.Connection, max_cycle: int = 3, max_chain: int = 4, p
             ],
         },
     )
-    return RunSummary(run_id, plan, len(inputs.cycles), len(inputs.arcs))
+    return RunSummary(run_id, plan, len(inputs.cycles), len(inputs.arcs), expected)
 
 
 def latest_run_id(conn: relate.Connection) -> str | None:

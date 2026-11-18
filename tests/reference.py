@@ -40,7 +40,30 @@ def all_exchanges(inputs: MatchInputs, max_cycle: int, max_chain: int) -> list[E
 
 def best_value(inputs: MatchInputs, max_cycle: int, max_chain: int) -> float:
     exchanges = all_exchanges(inputs, max_cycle, max_chain)
-    values = [sum(inputs.weight[p] for p in e.patients) for e in exchanges]
+    return _best_packing(exchanges, [sum(inputs.weight[p] for p in e.patients) for e in exchanges])
+
+
+def exact_expected_value(e: Exchange, inputs: MatchInputs) -> float:
+    """A cycle needs every transplant; a chain's k-th patient needs the first k transplants."""
+    q = inputs.success
+    if e.kind == "cycle":
+        whole = 1.0
+        for p in e.patients:
+            whole *= q[p]
+        return whole * sum(inputs.weight[p] for p in e.patients)
+    total, reach = 0.0, 1.0
+    for p in e.patients:
+        reach *= q[p]
+        total += reach * inputs.weight[p]
+    return total
+
+
+def best_expected_value(inputs: MatchInputs, max_cycle: int, max_chain: int) -> float:
+    exchanges = all_exchanges(inputs, max_cycle, max_chain)
+    return _best_packing(exchanges, [exact_expected_value(e, inputs) for e in exchanges])
+
+
+def _best_packing(exchanges: list[Exchange], values: list[float]) -> float:
     best = 0.0
 
     def search(i: int, used: frozenset[str], total: float) -> None:

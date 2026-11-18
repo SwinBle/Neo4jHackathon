@@ -1,0 +1,46 @@
+{
+  "name": "optn-kpd-2019-inspired",
+  "about": "Inspired by OPTN Policy 13.7.F, Table 13-2: OPTN KPD Prioritization Points (policy notice 'Revising Priority Points in Kidney Paired Donation Program', effective October 8, 2019). It is NOT a certified implementation of OPTN policy. It uses only the rows this synthetic pool can express, and it uses the points only to break ties between plans with the same number of transplants, whereas OPTN prioritizes the set of exchanges with the highest total point value (100 base points per match plus these points).",
+  "source": "https://optn.transplant.hrsa.gov/media/3239/20191011_kidney_kpd_priority_points.pdf (read from the Internet Archive copy http://web.archive.org/web/20250527133532/https://optn.transplant.hrsa.gov/media/3239/20191011_kidney_kpd_priority_points.pdf; the hrsa.unos.org copy returned 404)",
+  "rows_left_out": "0-ABDR mismatch, same region, same DSA, same transplant hospital, previous crossmatch, candidate under 18, prior living organ donor, donor carries another antibody specificity of the candidate (-5), orphan candidate (1,000,000): the pool has no data for them, or they depend on the donor-patient pair rather than the patient.",
+  "tie_break": [
+    {"kind": "wait_days", "per_day": 0.07, "note": "Table 13-2: .07 points for each day registered in the OPTN KPD program. Assumption: wait_days stands in for days registered in KPD."},
+    {"kind": "pool_pra_bands", "note": "Table 13-2 sliding scale, 'Candidate CPRA is ...'. Assumption: pool PRA, truncated to a whole percent, stands in for CPRA.", "bands": [
+      {"from_percent": 0, "value": 0},
+      {"from_percent": 20, "value": 5},
+      {"from_percent": 30, "value": 10},
+      {"from_percent": 40, "value": 15},
+      {"from_percent": 50, "value": 20},
+      {"from_percent": 60, "value": 25},
+      {"from_percent": 70, "value": 50},
+      {"from_percent": 75, "value": 75},
+      {"from_percent": 80, "value": 125},
+      {"from_percent": 85, "value": 200},
+      {"from_percent": 90, "value": 300},
+      {"from_percent": 95, "value": 500},
+      {"from_percent": 96, "value": 700},
+      {"from_percent": 97, "value": 900},
+      {"from_percent": 98, "value": 1250},
+      {"from_percent": 99, "value": 1500},
+      {"from_percent": 100, "value": 2000}
+    ]},
+    {"kind": "pool_pra_bands", "note": "Table 13-2: 'Candidate has a CPRA greater than or equal to 80%', 125 points, awarded on top of the sliding scale.", "bands": [
+      {"from_percent": 0, "value": 0},
+      {"from_percent": 80, "value": 125}
+    ]},
+    {"kind": "patient_blood", "note": "Table 13-2: 'Candidate ABO is ...'", "points": {"O": 100, "A": 25, "B": 50, "AB": 0}},
+    {"kind": "paired_donor_blood", "note": "Table 13-2: 'Paired donor ABO is ...'", "points": {"O": 0, "A": 250, "B": 100, "AB": 500}}
+  ],
+  "success": {
+    "about": "Chance that one planned transplant goes ahead, by the recipient's pool PRA. Used only by --objective expected and kx simulate. OPTN Table 13-2 has no success model; this is the same model as policies/default.json.",
+    "source": "Dickerson, Procaccia and Sandholm (2019), Failure-Aware Kidney Exchange, Management Science 65(4), section 8.2, https://par.nsf.gov/servlets/purl/10120603, reporting the crossmatch failure rates of Ashlagi et al. (2011) and the 0.08 exogenous failure rate the authors use.",
+    "assumption": "Pool PRA stands in for the clinical CPRA these rates were reported for. The source says 'above 75' for the top band; this file starts that band at 75 because the band below is reported as 50-74.",
+    "crossmatch_failure": [
+      {"from_percent": 0, "value": 0.05},
+      {"from_percent": 25, "value": 0.2},
+      {"from_percent": 50, "value": 0.35},
+      {"from_percent": 75, "value": 0.5}
+    ],
+    "exogenous_failure": 0.08
+  }
+}

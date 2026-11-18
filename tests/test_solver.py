@@ -5,19 +5,27 @@ import relate
 
 from kidneyloop.exchanges import Arc, Exchange
 from kidneyloop.generator import generate_pool
-from kidneyloop.solver import MatchInputs, patient_weight, plan_problems, plan_value, solve
+from kidneyloop.policy import PatientFacts, PoolFacts, load_policy
+from kidneyloop.solver import MatchInputs, patient_weight, plan_expected_value, plan_problems, plan_value, solve
 from kidneyloop.store import derive, load_pool
 
-from reference import all_exchanges, best_value
+from reference import all_exchanges, best_expected_value, best_value
+
+DEFAULT = load_policy()
 
 
-def inputs_from(arcs, pairs, weights=None, max_cycle=3):
+def default_weight(pool_pra, wait_days, max_wait, patients):
+    return patient_weight(DEFAULT.tie(PatientFacts(pool_pra, wait_days, "O", None), PoolFacts(max_wait)), patients)
+
+
+def inputs_from(arcs, pairs, weights=None, max_cycle=3, success=None):
     donor_of = {p: d for d, p in pairs}
-    weight = weights or {p: 1.0 for p in {a[1] for a in arcs} | set(donor_of)}
+    patients = {a[1] for a in arcs} | set(donor_of)
+    weight = weights or {p: 1.0 for p in patients}
     arc_objs = tuple(Arc(d, p, d not in set(donor_of.values())) for d, p in arcs)
     base = MatchInputs((), arc_objs, donor_of, weight)
     cycles = tuple(e for e in all_exchanges(base, max_cycle, 0) if e.kind == "cycle")
-    return MatchInputs(cycles, arc_objs, donor_of, weight)
+    return MatchInputs(cycles, arc_objs, donor_of, weight, success or {p: 1.0 for p in patients})
 
 
 def test_three_way_cycle_beats_overlapping_two_way_cycle():
@@ -46,14 +54,14 @@ def test_chain_stops_at_max_length():
 def test_tie_break_prefers_highly_sensitized_patient():
     pairs = [("D1", "P1"), ("D2", "P2")]
     arcs = [("N1", "P1"), ("N1", "P2")]
-    weights = {"P1": patient_weight(0.1, 100, 1000, 2), "P2": patient_weight(0.9, 100, 1000, 2)}
+    weights = {"P1": default_weight(0.1, 100, 1000, 2), "P2": default_weight(0.9, 100, 1000, 2)}
     plan = solve(inputs_from(arcs, pairs, weights))
     assert plan.matched_patients == {"P2"}
 
 
 def test_tie_break_never_costs_a_transplant():
     n = 300
-    worst_extra = n * (patient_weight(1.0, 2500, 2500, n) - 1.0)
+    worst_extra = n * (default_weight(1.0, 2500, 2500, n) - 1.0)
     assert worst_extra < 1.0
 
 
@@ -67,7 +75,7 @@ def test_empty_pool_gives_empty_plan():
     assert solve(MatchInputs((), (), {}, {})).transplants == 0
 
 
-def random_inputs(seed: int) -> MatchInputs:
+def random_inputs(seed: int, success=None) -> MatchInputs:
     rng = random.Random(seed)
     n_pairs, n_alt = rng.randint(2, 7), rng.randint(0, 2)
     pairs = [(f"D{i}", f"P{i}") for i in range(n_pairs)]
@@ -75,8 +83,9 @@ def random_inputs(seed: int) -> MatchInputs:
     patients = [p for _, p in pairs]
     density = rng.uniform(0.15, 0.6)
     arcs = [(d, p) for d in donors for p in patients if not d[1:] == p[1:] or d[0] == "N" if rng.random() < density]
-    weights = {p: patient_weight(rng.random(), rng.randint(1, 2500), 2500, n_pairs) for p in patients}
-    return inputs_from(arcs, pairs, weights)
+    weights = {p: default_weight(rng.random(), rng.randint(1, 2500), 2500, n_pairs) for p in patients}
+    chances = {p: success(rng) for p in patients} if success else None
+    return inputs_from(arcs, pairs, weights, success=chances)
 
 
 @pytest.mark.parametrize("seed", range(150))
@@ -124,3 +133,38 @@ def test_cypher_cycles_equal_reference_cycles_on_generated_pools(seed):
     expected = {e for e in all_exchanges(base, 3, 0) if e.kind == "cycle"}
     assert set(find_cycles(conn, 3)) == expected
     conn.close()
+
+
+def test_expected_objective_prefers_a_sure_two_way_cycle_over_a_riskier_three_way_cycle():
+    pairs = [("D1", "P1"), ("D2", "P2"), ("D3", "P3")]
+    arcs = [("D1", "P2"), ("D2", "P1"), ("D2", "P3"), ("D3", "P1")]
+    half = {p: 0.5 for _, p in pairs}
+    assert solve(inputs_from(arcs, pairs, success=half), objective="count").transplants == 3
+    plan = solve(inputs_from(arcs, pairs, success=half), objective="expected")
+    assert plan.exchanges == (Exchange("cycle", ("D2", "D1"), ("P1", "P2")),)
+
+
+@pytest.mark.parametrize("seed", range(80))
+def test_expected_objective_is_exact_when_every_transplant_has_the_same_chance(seed):
+    inputs = random_inputs(seed, success=lambda rng: 0.6)
+    plan = solve(inputs, max_chain=3, objective="expected")
+    assert plan_problems(plan, inputs, max_cycle=3, max_chain=3) == []
+    assert plan_expected_value(plan, inputs) == pytest.approx(best_expected_value(inputs, 3, 3), abs=1e-9)
+
+
+@pytest.mark.parametrize("seed", range(80))
+def test_expected_objective_is_exact_for_chains_of_two_with_mixed_chances(seed):
+    inputs = random_inputs(seed, success=lambda rng: rng.choice([0.42, 0.57, 0.72, 0.87]))
+    plan = solve(inputs, max_chain=2, objective="expected")
+    assert plan_problems(plan, inputs, max_cycle=3, max_chain=2) == []
+    assert plan_expected_value(plan, inputs) == pytest.approx(best_expected_value(inputs, 3, 2), abs=1e-9)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_expected_objective_with_longer_chains_and_mixed_chances_stays_valid_and_near_optimal(seed):
+    inputs = random_inputs(seed, success=lambda rng: rng.choice([0.42, 0.57, 0.72, 0.87]))
+    plan = solve(inputs, max_chain=3, objective="expected")
+    assert plan_problems(plan, inputs, max_cycle=3, max_chain=3) == []
+    best = best_expected_value(inputs, 3, 3)
+    assert plan_expected_value(plan, inputs) <= best + 1e-9
+    assert plan_expected_value(plan, inputs) >= 0.95 * best

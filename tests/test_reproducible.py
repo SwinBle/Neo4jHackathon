@@ -11,7 +11,9 @@ from kidneyloop.store import derive, load_pool
 conn = relate.connect(":memory:")
 load_pool(conn, generate_pool(seed=42, pairs=120, altruists=5))
 derive(conn)
-print(sorted((e.kind, e.donors, e.patients) for e in solve(read_inputs(conn)).exchanges))
+inputs = read_inputs(conn)
+for objective in ("count", "expected"):
+    print(sorted((e.kind, e.donors, e.patients) for e in solve(inputs, 4, objective).exchanges))
 """
 
 

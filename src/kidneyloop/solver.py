@@ -1,6 +1,7 @@
+import math
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Mapping
+from dataclasses import dataclass, field
+from typing import Literal, Mapping
 
 import numpy as np
 from scipy.optimize import Bounds, LinearConstraint, milp
@@ -15,12 +16,19 @@ class MatchInputs:
 
     donor_of maps each paired patient to the donor who came with them.
     weight is the solver's value for one transplant to that patient.
+    success is the chance that a planned transplant to that patient goes ahead;
+    only the expected objective reads it.
     """
 
     cycles: tuple[Exchange, ...]
     arcs: tuple[Arc, ...]
     donor_of: Mapping[str, str]
     weight: Mapping[str, float]
+    success: Mapping[str, float] = field(default_factory=dict)
+
+
+Objective = Literal["count", "expected"]
+OBJECTIVES: tuple[Objective, ...] = ("count", "expected")
 
 
 @dataclass(frozen=True)
@@ -79,19 +87,47 @@ def plan_value(plan: Plan, inputs: MatchInputs) -> float:
     return sum(inputs.weight[p] for p in plan.matched_patients)
 
 
-def patient_weight(pool_pra: float, wait_days: int, max_wait: int, patients: int) -> float:
+def receive_chances(exchange: Exchange, success: Mapping[str, float]) -> tuple[float, ...]:
+    """The chance that each patient of the exchange, in order, gets their kidney.
+
+    A cycle goes ahead only if every transplant in it does. A chain runs in order and
+    stops at its first failed transplant.
+    """
+    if exchange.kind == "cycle":
+        whole = math.prod(success[p] for p in exchange.patients)
+        return tuple(whole for _ in exchange.patients)
+    chances, reach = [], 1.0
+    for p in exchange.patients:
+        reach *= success[p]
+        chances.append(reach)
+    return tuple(chances)
+
+
+def plan_expected_value(plan: Plan, inputs: MatchInputs) -> float:
+    return sum(
+        inputs.weight[p] * c for e in plan.exchanges for p, c in zip(e.patients, receive_chances(e, inputs.success))
+    )
+
+
+def expected_transplants(plan: Plan, success: Mapping[str, float]) -> float:
+    return sum(sum(receive_chances(e, success)) for e in plan.exchanges)
+
+
+def patient_weight(tie: float, patients: int) -> float:
     """One per transplant, plus a tie-break below 1/patients.
 
-    The tie-break favours hard-to-match (high pool PRA) and long-waiting patients.
-    Summed over every patient it stays below one transplant, so the solver never
+    tie is the policy's score for the patient, scaled to [0, 1]. Summed over every
+    patient the tie-break stays below one transplant, so the count objective never
     trades a transplant for tie-break value.
     """
-    tie = 0.7 * pool_pra + 0.3 * (wait_days / max_wait if max_wait else 0.0)
     return 1.0 + tie / (patients + 1)
 
 
-def solve(inputs: MatchInputs, max_chain: int = 4) -> Plan:
+def solve(inputs: MatchInputs, max_chain: int = 4, objective: Objective = "count") -> Plan:
     """Pick disjoint cycles and chains that maximise total patient weight.
+
+    With objective "expected", each transplant's weight is multiplied by the chance
+    it happens (receive_chances), so the plan maximises expected transplants.
 
     Cycles come in pre-enumerated. Chains are built from arcs with one binary
     variable per arc and chain position: position 1 arcs leave an altruistic
@@ -107,6 +143,29 @@ def solve(inputs: MatchInputs, max_chain: int = 4) -> Plan:
     first = [a for a in arcs if a.altruistic] if max_chain >= 1 else []
     later = [a for a in arcs if not a.altruistic and a.donor in paired_donors]
     chain_vars = [(a, 1) for a in first] + [(a, k) for k in range(2, max_chain + 1) for a in later]
+
+    q = inputs.success
+    patient_of = {d: p for p, d in inputs.donor_of.items()}
+    paired = sorted(q[p] for p in inputs.donor_of) if objective == "expected" else []
+    q_mean = sum(paired) / len(paired) if paired else 1.0
+
+    def cycle_chance(cycle: Exchange) -> float:
+        return math.prod(q[p] for p in cycle.patients) if objective == "expected" else 1.0
+
+    def chain_chance(arc: Arc, k: int) -> float:
+        """The chance a chain reaches and completes position k on this arc.
+
+        The exact chance multiplies the success of every earlier arc, which a
+        per-arc variable cannot see. The arc itself pins down position k and,
+        through its donor, the patient at k-1; the k-2 positions before that are
+        approximated by the mean success over paired patients. Chains of up to two
+        transplants are therefore exact, and so is any pool with one success rate.
+        """
+        if objective == "count":
+            return 1.0
+        if k == 1:
+            return q[arc.patient]
+        return q[arc.patient] * q[patient_of[arc.donor]] * q_mean ** (k - 2)
 
     n_vars = len(cycles) + len(chain_vars)
     value = np.zeros(n_vars)
@@ -125,14 +184,14 @@ def solve(inputs: MatchInputs, max_chain: int = 4) -> Plan:
 
     receives: dict[str, list[int]] = defaultdict(list)
     for i, cycle in enumerate(cycles):
-        value[i] = sum(inputs.weight[p] for p in cycle.patients)
+        value[i] = sum(inputs.weight[p] for p in cycle.patients) * cycle_chance(cycle)
         for p in cycle.patients:
             receives[p].append(i)
 
     gives_at: dict[tuple[str, int], list[int]] = defaultdict(list)
     receives_at: dict[tuple[str, int], list[int]] = defaultdict(list)
     for j, (arc, k) in enumerate(chain_vars, start=len(cycles)):
-        value[j] = inputs.weight[arc.patient]
+        value[j] = inputs.weight[arc.patient] * chain_chance(arc, k)
         receives[arc.patient].append(j)
         gives_at[(arc.donor, k)].append(j)
         receives_at[(arc.patient, k)].append(j)

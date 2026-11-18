@@ -7,6 +7,7 @@ import pytest
 import relate
 
 from kidneyloop.explain import explain
+from kidneyloop.policy import load_policy
 from kidneyloop.runs import latest_run_id, read_inputs, run_exchanges
 from kidneyloop.solver import Plan, plan_problems, plan_value, solve
 from kidneyloop.store import relate_cli
@@ -170,3 +171,47 @@ def test_committed_store_run_is_sound():
     before = fingerprint(store)
     assert_run_is_sound(store)
     assert fingerprint(store) == before
+
+
+def test_match_records_the_policy_and_objective_it_used(store_copy):
+    policy = REPO / "policies" / "optn-kpd-2019-inspired.json"
+    result = kx("match", "--store", str(store_copy), "--policy", str(policy), "--objective", "expected", cwd=store_copy.parent)
+    assert result.returncode == 0, result.stderr
+    assert "expected objective, policy optn-kpd-2019-inspired" in result.stdout
+    with relate.connect(str(store_copy), read_only=True) as conn:
+        run = conn.execute(
+            "MATCH (r:MatchRun) RETURN r.policy AS policy, r.policy_sha256 AS sha, r.objective AS objective "
+            "ORDER BY r.seq DESC LIMIT 1"
+        ).single()
+        assert plan_problems(latest_plan(conn), read_inputs(conn)) == []
+    assert run["policy"] == "optn-kpd-2019-inspired"
+    assert run["sha"] == load_policy(policy).sha256
+    assert run["objective"].startswith("max expected transplants")
+
+
+def test_simulate_compares_both_plans_and_changes_no_file(built_store):
+    before = fingerprint(built_store)
+    result = kx("simulate", "--trials", "50", "--seed", "3", "--store", str(built_store), cwd=built_store.parent)
+    assert result.returncode == 0, result.stderr
+    assert "expected - count, paired by trial" in result.stdout and "patients):" in result.stdout
+    assert fingerprint(built_store) == before
+
+
+@pytest.mark.parametrize(
+    "args, message",
+    [
+        (["match", "--objective", "luck"], "--objective must be one of count, expected"),
+        (["match", "--policy", "missing.json"], "cannot read policy"),
+        (["simulate", "--trials", "1"], "--trials must be at least 2"),
+    ],
+)
+def test_policy_and_objective_errors_exit_2(store_copy, args, message):
+    result = kx(*args, "--store", str(store_copy), cwd=store_copy.parent)
+    assert result.returncode == 2 and message in result.stderr
+
+
+def test_bad_policy_file_names_the_field(store_copy, tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"name": "x", "tie_break": [{"kind": "lottery"}], "success": {}}))
+    result = kx("match", "--store", str(store_copy), "--policy", str(bad), cwd=store_copy.parent)
+    assert result.returncode == 2 and "tie_break[0].kind" in result.stderr

@@ -1,0 +1,20 @@
+{
+  "name": "default",
+  "about": "KidneyLoop's original scoring. Every transplant is worth 1; when plans tie, the tie-break favours high pool PRA and long waits. The weights 0.7 and 0.3 are this project's choice, not taken from any published scheme.",
+  "tie_break": [
+    {"kind": "pool_pra_linear", "per_unit": 0.7, "note": "assumption: this project's choice"},
+    {"kind": "wait_share_linear", "per_unit": 0.3, "note": "assumption: this project's choice; wait_days divided by the longest wait in the pool"}
+  ],
+  "success": {
+    "about": "Chance that one planned transplant goes ahead, by the recipient's pool PRA. Used only by --objective expected and kx simulate.",
+    "source": "Dickerson, Procaccia and Sandholm (2019), Failure-Aware Kidney Exchange, Management Science 65(4), section 8.2, https://par.nsf.gov/servlets/purl/10120603, reporting the crossmatch failure rates of Ashlagi et al. (2011) and the 0.08 exogenous failure rate the authors use.",
+    "assumption": "Pool PRA stands in for the clinical CPRA these rates were reported for. The source says 'above 75' for the top band; this file starts that band at 75 because the band below is reported as 50-74.",
+    "crossmatch_failure": [
+      {"from_percent": 0, "value": 0.05},
+      {"from_percent": 25, "value": 0.2},
+      {"from_percent": 50, "value": 0.35},
+      {"from_percent": 75, "value": 0.5}
+    ],
+    "exogenous_failure": 0.08
+  }
+}

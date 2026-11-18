@@ -68,6 +68,27 @@ MUTATIONS = [
         "return 1.0 + tie",
         ["tests/test_solver.py"],
     ),
+    (
+        "expected objective ignores chain position",
+        "src/kidneyloop/solver.py",
+        "        return q[arc.patient] * q[patient_of[arc.donor]] * q_mean ** (k - 2)\n",
+        "        return q[arc.patient]\n",
+        ["tests/test_solver.py"],
+    ),
+    (
+        "expected objective treats a cycle like independent transplants",
+        "src/kidneyloop/solver.py",
+        "        return math.prod(q[p] for p in cycle.patients) if objective == \"expected\" else 1.0\n",
+        "        return 1.0\n",
+        ["tests/test_solver.py"],
+    ),
+    (
+        "simulated chain continues past a failed transplant",
+        "src/kidneyloop/simulate.py",
+        "np.cumprod(steps, axis=1)",
+        "steps",
+        ["tests/test_simulate.py"],
+    ),
 ]
 
 
