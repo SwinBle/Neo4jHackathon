@@ -43,7 +43,7 @@ The user is a transplant coordinator running a matching round.
 
 Nodes:
 
-- `Patient {id, blood_type, cpra, wait_days, region}`
+- `Patient {id, wait_days, pool_pra}`
 - `Donor {id, blood_type, region, altruistic}`
 - `BloodType {name}`
 - `Antigen {name}`
@@ -58,7 +58,7 @@ Relationships:
 - `(Donor)-[:HAS_ANTIGEN]->(Antigen)`
 - `(Patient)-[:HAS_ANTIBODY]->(Antigen)`
 - `(Donor)-[:COMPATIBLE]->(Patient)`, derived from the blood-type and antibody rules
-- `Patient.cpra` is derived too: the share of pool donors the patient's antibodies rule out
+- `Patient.pool_pra` is derived too: the share of pool donors the patient's antibodies rule out
 - `(MatchRun)-[:SELECTED]->(Exchange)-[:INCLUDES {order}]->(Donor|Patient)`
 
 ## Decisions
@@ -69,7 +69,7 @@ Relationships:
 | Store | Directory store, `json` codec, committed | Judges can read `graph.json`; git diff shows each matching round |
 | Compatibility | ABO plus synthetic HLA antibodies | Unmatched explanations become multi-hop paths |
 | Selection | Cypher enumerates cycles; the ILP (HiGHS via `scipy.optimize.milp`; `pulp` 3 imports numpy without declaring it) builds chains from compatible arcs and selects | Enumerating chains does not scale: seed 42 has 47,572 length-2 chains, and length-3 enumeration hits the engine's 256 MB value limit |
-| Objective | Max transplants, tie-break on high cPRA and wait time | Weights stored on `MatchRun` |
+| Objective | Max transplants, tie-break on high pool PRA and wait time | Weights stored on `MatchRun` |
 | Limits | Cycles up to 3, chains up to 4 | Source to cite in README, or state as our choice |
 | Data | Seeded generator, 300 pairs and 10 altruistic donors | Reproducible runs |
 | Agent | `relate serve --mcp stdio --read-only` plus `.mcp.json` and query recipes | No API key required; custom MCP tools are a stretch goal |

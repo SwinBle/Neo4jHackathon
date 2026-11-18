@@ -8,10 +8,10 @@ import relate
 from .exchanges import Exchange, find_arcs, find_cycles
 from .solver import MatchInputs, Plan, patient_weight, solve
 
-OBJECTIVE = "max transplants; tie-break 0.7 x cPRA + 0.3 x wait share"
+OBJECTIVE = "max transplants; tie-break 0.7 x pool PRA + 0.3 x wait share"
 SOLVER = "HiGHS via scipy.optimize.milp"
 
-PATIENTS = "MATCH (p:Patient) RETURN p.id AS id, p.cpra AS cpra, p.wait_days AS wait_days"
+PATIENTS = "MATCH (p:Patient) RETURN p.id AS id, p.pool_pra AS pool_pra, p.wait_days AS wait_days"
 PAIRS = "MATCH (d:Donor)-[:PAIRED_WITH]->(p:Patient) RETURN d.id AS donor, p.id AS patient"
 
 NEXT_SEQ = "OPTIONAL MATCH (r:MatchRun) RETURN coalesce(max(r.seq), 0) + 1 AS seq"
@@ -59,7 +59,7 @@ def _quiet(_: str) -> None:
 def read_inputs(conn: relate.Connection, max_cycle: int = 3, progress: Progress = _quiet) -> MatchInputs:
     patients = list(conn.execute(PATIENTS))
     max_wait = max((p["wait_days"] for p in patients), default=0)
-    weight = {p["id"]: patient_weight(p["cpra"], p["wait_days"], max_wait, len(patients)) for p in patients}
+    weight = {p["id"]: patient_weight(p["pool_pra"], p["wait_days"], max_wait, len(patients)) for p in patients}
     donor_of = {row["patient"]: row["donor"] for row in conn.execute(PAIRS)}
     started = time.perf_counter()
     cycles = tuple(find_cycles(conn, max_cycle))

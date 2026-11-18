@@ -79,14 +79,14 @@ def plan_value(plan: Plan, inputs: MatchInputs) -> float:
     return sum(inputs.weight[p] for p in plan.matched_patients)
 
 
-def patient_weight(cpra: float, wait_days: int, max_wait: int, patients: int) -> float:
+def patient_weight(pool_pra: float, wait_days: int, max_wait: int, patients: int) -> float:
     """One per transplant, plus a tie-break below 1/patients.
 
-    The tie-break favours hard-to-match (high cPRA) and long-waiting patients.
+    The tie-break favours hard-to-match (high pool PRA) and long-waiting patients.
     Summed over every patient it stays below one transplant, so the solver never
     trades a transplant for tie-break value.
     """
-    tie = 0.7 * cpra + 0.3 * (wait_days / max_wait if max_wait else 0.0)
+    tie = 0.7 * pool_pra + 0.3 * (wait_days / max_wait if max_wait else 0.0)
     return 1.0 + tie / (patients + 1)
 
 

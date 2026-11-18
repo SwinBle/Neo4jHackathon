@@ -54,14 +54,14 @@ WHERE NOT (d)-[:PAIRED_WITH]->(p)
 CREATE (d)-[:COMPATIBLE]->(p)
 """
 
-# cPRA here is the share of donors in this pool that the patient's antibodies rule out,
-# a pool-local stand-in for the population-based calculated PRA.
-DERIVE_CPRA = """
+# Pool PRA: the share of donors in this pool whose antigens the patient has antibodies to.
+# It is not the clinical cPRA, which is computed against a reference donor population.
+DERIVE_POOL_PRA = """
 MATCH (any:Donor) WITH count(any) AS total
 MATCH (p:Patient)
 OPTIONAL MATCH (p)-[:HAS_ANTIBODY]->(:Antigen)<-[:HAS_ANTIGEN]-(d:Donor)
 WITH p, total, count(DISTINCT d) AS blocked
-SET p.cpra = toFloat(blocked) / total
+SET p.pool_pra = toFloat(blocked) / total
 """
 
 
@@ -133,4 +133,4 @@ def load_pool(conn: relate.Connection, pool: Pool) -> None:
 
 def derive(conn: relate.Connection) -> None:
     conn.execute(DERIVE_COMPATIBLE)
-    conn.execute(DERIVE_CPRA)
+    conn.execute(DERIVE_POOL_PRA)

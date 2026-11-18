@@ -35,12 +35,12 @@ def test_donor_never_gets_an_edge_to_own_patient(graph_of):
     assert edges(conn) == set()
 
 
-def test_cpra_is_share_of_pool_donors_blocked_by_antibodies(graph_of):
+def test_pool_pra_is_share_of_pool_donors_blocked_by_antibodies(graph_of):
     conn = graph_of(
         [patient("P1", antibodies=["B8"])],
         [donor("D1", antigens=["B8"]), donor("D2", antigens=["A2"]), donor("D3", antigens=["B8", "A2"]), donor("D4")],
     )
-    assert conn.execute("MATCH (p:Patient {id: 'P1'}) RETURN p.cpra AS c").single()["c"] == 0.5
+    assert conn.execute("MATCH (p:Patient {id: 'P1'}) RETURN p.pool_pra AS c").single()["c"] == 0.5
 
 
 def test_generated_pairs_are_incompatible_and_reproducible():

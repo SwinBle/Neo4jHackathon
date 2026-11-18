@@ -138,9 +138,14 @@ def whatif(withdraw: str = typer.Option(..., help="Donor id to withdraw"), store
         typer.echo(f"  waiting on {result.donor} or a donor after it: {', '.join(result.stranded)}")
     else:
         typer.echo("  no chosen exchange uses this donor")
-    typer.echo(f"  re-plan: {len(result.before)} -> {len(result.after)} patients matched")
-    typer.echo(f"  lose a kidney: {', '.join(sorted(result.lost)) or 'none'}")
-    typer.echo(f"  newly matched: {', '.join(sorted(result.gained)) or 'none'}")
+    typer.echo(f"  repair (other exchanges kept): {len(result.before)} -> {len(result.after)} patients matched")
+    typer.echo(f"    lose a kidney: {', '.join(sorted(result.lost)) or 'none'}")
+    typer.echo(f"    newly matched: {', '.join(sorted(result.gained)) or 'none'}")
+    typer.echo(f"    same patient, different donor (needs a new crossmatch): {', '.join(sorted(result.reassigned)) or 'none'}")
+    typer.echo(
+        f"  full re-plan instead: {len(result.fresh.matched_patients)} patients matched, "
+        f"{len(result.fresh_moved)} of them moved to a different donor"
+    )
     typer.echo("  (rolled back; the store is unchanged)")
 
 

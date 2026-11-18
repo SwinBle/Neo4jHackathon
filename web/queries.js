@@ -19,7 +19,7 @@ export const PROFILE = `
 MATCH (p:Patient {id: $id})-[:HAS_BLOOD]->(pb:BloodType)
 OPTIONAL MATCH (own:Donor)-[:PAIRED_WITH]->(p)
 OPTIONAL MATCH (own)-[:COMPATIBLE]->(target:Patient)
-RETURN pb.name AS blood, p.cpra AS cpra, own.id AS own_donor, count(target) AS own_donor_can_give`;
+RETURN pb.name AS blood, p.pool_pra AS pool_pra, own.id AS own_donor, count(target) AS own_donor_can_give`;
 
 export const ABO_DONORS = `
 MATCH (p:Patient {id: $id})-[:HAS_BLOOD]->(pb:BloodType)
@@ -46,7 +46,7 @@ MATCH (p:Patient {id: $id})<-[:PAIRED_WITH]-(:Donor)-[:COMPATIBLE]->(p2:Patient)
 WHERE p2 <> p3 AND p2 <> p AND p3 <> p
 RETURN [p.id, p2.id, p3.id] AS patients`;
 
-export const PATIENT_INDEX = `MATCH (p:Patient) RETURN p.id AS id, p.cpra AS cpra ORDER BY p.cpra DESC, id`;
+export const PATIENT_INDEX = `MATCH (p:Patient) RETURN p.id AS id, p.pool_pra AS pool_pra ORDER BY p.pool_pra DESC, id`;
 
 export const ALTRUISTS_FOR = `MATCH (n:Donor {altruistic: true})-[:COMPATIBLE]->(:Patient {id: $id}) RETURN n.id AS id ORDER BY id`;
 

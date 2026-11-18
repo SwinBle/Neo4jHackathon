@@ -109,6 +109,55 @@ def test_whatif_replan_never_serves_the_withdrawn_pair_and_keeps_run_limits(grap
     assert all(e.kind == "cycle" and e.size == 2 for e in result.replan.exchanges)
 
 
+def test_whatif_names_patients_who_keep_a_kidney_from_a_new_donor(graph_of):
+    patients = [patient("P1"), patient("P2", antibodies=["A1"]), patient("P3")]
+    donors = [donor("D1", paired_with="P1"), donor("D2", paired_with="P2"), donor("D3", paired_with="P3")]
+    conn = graph_of(patients, donors)
+    for statement in [
+        "MATCH ()-[c:COMPATIBLE]->() DELETE c",
+        "MATCH (d:Donor {id: 'D1'}), (p:Patient {id: 'P2'}) CREATE (d)-[:COMPATIBLE]->(p)",
+        "MATCH (d:Donor {id: 'D2'}), (p:Patient {id: 'P1'}) CREATE (d)-[:COMPATIBLE]->(p)",
+        "MATCH (d:Donor {id: 'D3'}), (p:Patient {id: 'P1'}) CREATE (d)-[:COMPATIBLE]->(p)",
+        "MATCH (d:Donor {id: 'D1'}), (p:Patient {id: 'P3'}) CREATE (d)-[:COMPATIBLE]->(p)",
+    ]:
+        conn.execute(statement)
+    run_match(conn, max_cycle=2)
+    result = withdraw_donor(conn, "D2")
+    assert result.leaving == "P2"
+    assert result.after == {"P1", "P3"}
+    assert result.reassigned == {"P1"}
+
+
+def test_whatif_keeps_untouched_exchanges_exactly_as_planned(graph_of):
+    patients = [patient(f"P{i}") for i in range(1, 5)]
+    donors = [donor(f"D{i}", paired_with=f"P{i}") for i in range(1, 5)]
+    conn = graph_of(patients, donors)
+    conn.execute("MATCH ()-[c:COMPATIBLE]->() DELETE c")
+    for d, p in [("D1", "P2"), ("D2", "P1"), ("D3", "P4"), ("D4", "P3"), ("D1", "P3"), ("D3", "P1")]:
+        conn.execute(f"MATCH (d:Donor {{id: '{d}'}}), (p:Patient {{id: '{p}'}}) CREATE (d)-[:COMPATIBLE]->(p)")
+    run = run_match(conn, max_cycle=2)
+    result = withdraw_donor(conn, "D2")
+    untouched = [e for _, e in result.planned if "D2" not in e.donors]
+    assert untouched and all(e in result.replan.exchanges for e in untouched)
+    assert result.reassigned == frozenset()
+    assert set(run.plan.exchanges) - set(result.replan.exchanges) == {e for _, e in result.broken}
+
+
+def test_whatif_on_a_chain_end_donor_breaks_that_chain(graph_of):
+    patients = [patient("P1"), patient("P2")]
+    donors = [donor("N1"), donor("D1", paired_with="P1"), donor("D2", paired_with="P2")]
+    conn = graph_of(patients, donors)
+    conn.execute("MATCH ()-[c:COMPATIBLE]->() DELETE c")
+    for d, p in [("N1", "P1"), ("D1", "P2")]:
+        conn.execute(f"MATCH (d:Donor {{id: '{d}'}}), (p:Patient {{id: '{p}'}}) CREATE (d)-[:COMPATIBLE]->(p)")
+    run_match(conn)
+    result = withdraw_donor(conn, "D2")
+    assert result.leaving == "P2"
+    assert [e.patients for _, e in result.broken] == [("P1", "P2")]
+    assert result.stranded == ()
+    assert result.after == {"P1"}
+
+
 def test_whatif_needs_a_run_and_a_real_donor(graph_of):
     conn = graph_of(*swap_pool())
     with pytest.raises(LookupError):

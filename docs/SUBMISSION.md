@@ -35,7 +35,7 @@ Many people who need a kidney have a relative or friend willing to donate, but t
 ### How it uses Relate
 
 - Directory store with the `json` codec, committed at `data/kidneyloop/`, so judges can read `graph.json` and `git diff` shows what each matching round decided.
-- Blood-type rules (`ABO_CAN_GIVE_TO`) and antibody to antigen links are graph data; Cypher derives every `COMPATIBLE` edge and each patient's cPRA.
+- Blood-type rules (`ABO_CAN_GIVE_TO`) and antibody to antigen links are graph data; Cypher derives every `COMPATIBLE` edge and each patient's pool PRA (the share of pool donors their antibodies rule out).
 - Multi-hop Cypher enumerates 2-way and 3-way cycles (38,332 on the committed pool) and walks the paths behind each explanation.
 - Transactions with rollback power the what-if; read-only opens power `why` and the MCP server.
 - `relate serve --mcp stdio --read-only` and `@relate/relate-wasm` serve the same graph to agents and to the browser.

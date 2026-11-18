@@ -109,7 +109,7 @@ async function fillPatientPickers() {
   $('#patient-ids').replaceChildren(...patients.map((p) => el('option', { value: p.id })));
   const hardest = patients.filter((p) => !state.holder.has(p.id)).slice(0, 8);
   $('#hard-picks').replaceChildren(
-    ...hardest.map((p) => el('button', { type: 'button', class: 'chip', onclick: () => explain(p.id), 'aria-label': `Explain ${p.id}, cPRA ${Math.round(p.cpra * 100)} percent` }, p.id, el('span', { class: 'pct' }, `${Math.round(p.cpra * 100)}%`))),
+    ...hardest.map((p) => el('button', { type: 'button', class: 'chip', onclick: () => explain(p.id), 'aria-label': `Explain ${p.id}, antibodies rule out ${Math.round(p.pool_pra * 100)} percent of donors` }, p.id, el('span', { class: 'pct' }, `${Math.round(p.pool_pra * 100)}%`))),
   );
 }
 
@@ -223,7 +223,7 @@ async function explain(id) {
 // Mirrors render() in src/kidneyloop/explain.py line for line, so `kx why` and the page agree.
 // figures add the graph picture the CLI cannot show; they never change the text.
 async function whyLines(id, profile) {
-  const lines = [`${id}: blood type ${profile.blood}, cPRA ${Math.round(profile.cpra * 100)}% of pool donors ruled out by antibodies`];
+  const lines = [`${id}: blood type ${profile.blood}; antibodies rule out ${Math.round(profile.pool_pra * 100)}% of this pool's donors (pool PRA)`];
   const figures = [];
   const done = () => ({ lines, figures });
   const ex = state.exchanges.find((e) => e.patients.includes(id));
@@ -280,7 +280,7 @@ async function withdraw(id) {
     return;
   }
   const [{ leaving }] = await rows(Q.WITHDRAW, { id });
-  const broken = state.exchanges.filter((e) => e.donors.includes(id));
+  const broken = state.exchanges.filter((e) => e.donors.includes(id) || (leaving && e.patients.includes(leaving)));
   state.withdrawn = { id, broken: broken.map((e) => e.id) };
   const stranded = broken.flatMap((e) => strandedBy(e, id)).filter((p) => p !== leaving);
   out.replaceChildren(
@@ -297,7 +297,8 @@ async function withdraw(id) {
 // A chain still serves the patients before the withdrawn donor's position.
 function strandedBy(exchange, donor) {
   if (exchange.kind === 'cycle') return exchange.patients;
-  return exchange.patients.slice(exchange.donors.indexOf(donor));
+  const at = exchange.donors.indexOf(donor);
+  return at < 0 ? [] : exchange.patients.slice(at);
 }
 
 async function runConsole() {

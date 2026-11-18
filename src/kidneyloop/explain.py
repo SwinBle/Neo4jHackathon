@@ -9,7 +9,7 @@ PROFILE = """
 MATCH (p:Patient {id: $id})-[:HAS_BLOOD]->(pb:BloodType)
 OPTIONAL MATCH (own:Donor)-[:PAIRED_WITH]->(p)
 OPTIONAL MATCH (own)-[:COMPATIBLE]->(target:Patient)
-RETURN pb.name AS blood, p.cpra AS cpra, own.id AS own_donor, count(target) AS own_donor_can_give
+RETURN pb.name AS blood, p.pool_pra AS pool_pra, own.id AS own_donor, count(target) AS own_donor_can_give
 """
 ABO_DONORS = """
 MATCH (p:Patient {id: $id})-[:HAS_BLOOD]->(pb:BloodType)
@@ -40,7 +40,7 @@ RETURN [p.id, p2.id, p3.id] AS patients
 class Why:
     patient: str
     blood: str
-    cpra: float
+    pool_pra: float
     run: str | None
     matched_in: tuple[str, Exchange] | None
     abo_donors: int
@@ -70,7 +70,7 @@ def explain(conn: relate.Connection, patient_id: str) -> Why:
     return Why(
         patient=patient_id,
         blood=profile["blood"],
-        cpra=profile["cpra"],
+        pool_pra=profile["pool_pra"],
         run=run,
         matched_in=matched,
         abo_donors=conn.execute(ABO_DONORS, params).single()["n"],
@@ -86,7 +86,7 @@ def explain(conn: relate.Connection, patient_id: str) -> Why:
 
 
 def render(why: Why) -> list[str]:
-    lines = [f"{why.patient}: blood type {why.blood}, cPRA {why.cpra:.0%} of pool donors ruled out by antibodies"]
+    lines = [f"{why.patient}: blood type {why.blood}; antibodies rule out {why.pool_pra:.0%} of this pool's donors (pool PRA)"]
     if why.matched_in:
         ex_id, e = why.matched_in
         steps = ", ".join(f"{d} -> {p}" for d, p in zip(e.donors, e.patients))
