@@ -63,7 +63,6 @@ kx why P071
 ```
 
 ```text
-Note: R1 was recorded without an input hash, so a change to the pool since cannot be detected.
 P071: blood type O; antibodies rule out 86% of this pool's donors (pool PRA)
 Not matched in R1.
 68 donors have a blood type that can give to O.
@@ -98,7 +97,7 @@ If D085 withdraws from R1:
 
 A paired donor who withdraws takes their patient out of the exchange, because that patient no longer brings a kidney to trade. Real programs do not reshuffle accepted matches when one donor drops out, since every new donor-patient pairing needs a fresh crossmatch. So `kx whatif` keeps every exchange the withdrawal leaves intact and re-plans only the freed and unmatched patients, with the latest run's cycle and chain limits. It also reports what a from-scratch re-plan would do. Here that would match two more patients but move 155 patients to a different donor, a trade-off the coordinator can now see.
 
-Patient and donor ids are case-insensitive. `kx match` and `kx whatif` print each stage and its time to stderr while they run. They took 30 to 60 seconds on the author's Windows laptop for the 300-pair pool. Most of that time goes to cycle enumeration in Cypher and the exact integer program. `kx why` answers in under a second. `kx counterfactual` re-solves the pool once per change it tries, up to five times, and took about 4 minutes for P071.
+Patient and donor ids are case-insensitive. `kx match` and `kx whatif` print each stage and its time to stderr while they run. They took 30 to 60 seconds on the author's Windows laptop for the 300-pair pool. Most of that time goes to cycle enumeration in Cypher and the exact integer program. `kx why` answers in under a second. `kx counterfactual` re-solves the pool once per change it tries, up to six times, and took about 4 minutes for P071.
 
 ### Auditing a run
 
@@ -127,31 +126,32 @@ P071: blood type O; antibodies rule out 86% of this pool's donors (pool PRA)
 ...
 ```
 
-The committed run R1 was recorded before input hashing, so for R1 `kx audit` prints `cannot tell whether inputs changed since this run` and `kx why` prints the `Note:` line shown above. The hash covers solver inputs only. A changed antibody or antigen that has not been re-derived into `COMPATIBLE` edges does not change it.
+The committed run R1 carries its hash, so `kx audit` on a fresh clone prints `inputs unchanged`. A run recorded before input hashing gets `cannot tell whether inputs changed since this run` instead. The hash covers solver inputs only. A changed antibody or antigen that has not been re-derived into `COMPATIBLE` edges does not change it.
 
 ### Counterfactuals
 
-`kx counterfactual P071` asks which single change would get an unmatched patient into the plan, and checks each candidate by re-solving the whole pool with the latest run's cycle and chain limits, policy and objective. A run recorded before policies existed (R1) is re-solved with `policies/default.json`, which reproduces its weights. The candidates are bounded:
+`kx counterfactual P071` asks which single change would get an unmatched patient into the plan, and checks each candidate by re-solving the whole pool with the latest run's cycle and chain limits, policy and objective. The candidates are bounded:
 
 1. Without one of the patient's antibodies, for the three antigens that block the most blood-compatible donors (as in `kx why`). The `HAS_ANTIBODY` edge is deleted, every `COMPATIBLE` edge and `pool_pra` is re-derived with the store's own Cypher rules, and the pool is re-solved, all inside a transaction that is rolled back. If dropping the antibody opens no donor, because each donor it blocks carries another antigen the patient reacts to, that change is reported and not re-solved.
 2. Chains one transplant longer than the run allowed.
 3. 3-way cycles, if the run allowed only 2-way ones.
+4. The patient required: serving them is made worth more than any number of other transplants, so the solver includes them whenever any exchange can. The transplant delta is the price of serving them, and the lost list names who pays it.
 
 For each change it reports the transplant count against the recorded run, every patient who would lose their kidney, and how many would move to a different donor. On a copy of the committed store (about 4 minutes):
 
 ```text
-Note: R1 was recorded without an input hash, so a change to the pool since cannot be detected.
 P071 is not matched in R1 (count objective, policy default, cycles of up to 3, chains of up to 4: 193 transplants).
 Single changes, each checked by re-solving the whole pool:
   without the antibody to A2 (it blocks 19 blood-compatible donors): opens 5 donors; P071 still unmatched; 193 -> 193 transplants (+0); lose a kidney: none; 142 moved to a different donor
   without the antibody to DR14 (it blocks 19 blood-compatible donors): opens 6 donors; P071 still unmatched; 193 -> 193 transplants (+0); lose a kidney: none; 146 moved to a different donor
   without the antibody to DR12 (it blocks 16 blood-compatible donors): opens 4 donors; P071 still unmatched; 193 -> 193 transplants (+0); lose a kidney: none; 151 moved to a different donor
   chains of up to 5 instead of 4: P071 still unmatched; 193 -> 193 transplants (+0); lose a kidney: none; 159 moved to a different donor
-No single change tried gets P071 matched.
+  P071 required in the plan: P071 matched; 193 -> 193 transplants (+0); lose a kidney: P167; 147 moved to a different donor
+First change that gets P071 matched: P071 required in the plan; P167 would lose a kidney.
 (antibody changes rolled back; the store is unchanged)
 ```
 
-So for P071 the honest answer is no: each antibody change opens four to six donors, but the optimal plan still has 193 transplants and still leaves P071 out. P090, with no cycle through it in R1, gets the same answer. Tests on small pools built so the answer is known check the other outcomes: a dropped antibody that matches the patient and names the patient who loses a kidney, a longer chain that reaches the patient, 3-way cycles that help a 2-cycle run, and a case where no single change helps.
+So for P071 no clinical change helps: each antibody change opens four to six donors, but the optimal plan still leaves P071 out. Requiring P071 shows why: it costs no transplants, only P167's. Two plans with 193 transplants exist, and the tie-break (pool PRA and wait) picked the one that serves P167. A coordinator who wants P071 instead now sees exactly who pays for it. Tests on small pools built so the answer is known check the other outcomes: a dropped antibody that matches the patient and names the patient who loses a kidney, a longer chain that reaches the patient, 3-way cycles that help a 2-cycle run, a required patient who bumps another, and a case where no single change helps.
 
 To rebuild the store from scratch, install the relate CLI ([install guide](https://relatedb.ai/docs/get-started/install)) and run `kx build` (seed 42, 300 pairs, 10 altruistic donors), then `kx match`. `kx build` with the same seed writes a byte-identical `graph.json`. `kx match` then adds a `MatchRun` whose `created_at` is the time of the run, and it picks the same exchanges every time for the same pool: when several plans tie, the solver's input order is fixed, so the choice does not depend on row order or Python's hash seed. `kx build` refuses to replace a folder that is not a Relate store.
 
@@ -248,7 +248,7 @@ What this shows, and what it does not:
 ## Testing and QA
 
 ```bash
-pytest -m "not qa_full"       # 476 tests, about 50 s
+pytest -m "not qa_full"       # 477 tests, about 2 min
 pytest -m qa_full             # the committed 300-pair store, about 2 min
 python scripts/mutation_check.py
 ```

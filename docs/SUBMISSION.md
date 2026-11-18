@@ -8,7 +8,7 @@ KidneyLoop
 
 ## Elevator pitch
 
-Kidney paired-donation cycles and chains on a Relate graph, with the graph path behind every match and every miss.
+Kidney paired-donation matching on a Relate graph: failure-aware plans, a graph path behind every match and miss, verified counterfactuals and auditable runs.
 
 ## Repository
 
@@ -26,18 +26,20 @@ Many people who need a kidney have a relative or friend willing to donate, but t
 
 ### What KidneyLoop does
 
-- `kx match` picks disjoint cycles and chains that maximise transplants, favouring hard-to-match patients on ties, and records the plan in the graph as a MatchRun.
+- `kx match` picks disjoint cycles and chains with an exact integer program and records the plan in the graph as a MatchRun. Scoring comes from a policy JSON file (`policies/`), not hard-coded weights; one policy follows the OPTN KPD priority-points table where our data can express it.
+- `--objective expected` plans for transplants that actually happen. Most planned KPD transplants fail (crossmatch and other failures, rates from Dickerson, Procaccia and Sandholm 2019): a cycle needs every transplant, a chain stops at its first failure. `kx simulate` replays both plans on the same sampled outcomes: on the committed pool the count plan realises 49.9 transplants per round and the expected plan 84.6 (+34.7, 95% CI +34.0 to +35.5).
 - `kx why <patient>` explains a match or a miss from graph paths: blood-type candidates, the antigens that block donors, the cycles through the patient and which other exchange holds each blocking patient.
-- `kx whatif --withdraw <donor>` deletes the donor and their patient inside a transaction, re-plans, reports what breaks, and rolls back.
-- A web explorer runs the same Cypher in the browser on Relate's WebAssembly build and draws the cycles behind each answer.
-- An MCP config lets any agent query the store read-only.
+- `kx counterfactual <patient>` tries single changes (one antibody less, longer chains, 3-way cycles, the patient required) and verifies each by re-solving the whole pool inside a rolled-back transaction, reporting who would lose a kidney.
+- `kx whatif --withdraw <donor>` repairs the plan the way programs do: intact exchanges stay, only freed and unmatched patients are re-planned. It reports who loses a kidney and who needs a new crossmatch, compares with a full re-plan (which would move 155 patients), and rolls back.
+- `kx audit` compares a SHA-256 of the solver's inputs and policy, stored on every MatchRun, with the store as it is now; `why`, `whatif` and `counterfactual` warn when an answer may be stale.
+- A web explorer runs the same Cypher in the browser on Relate's WebAssembly build and draws the cycles behind each answer. An MCP config lets any agent query the store read-only.
 
 ### How it uses Relate
 
 - Directory store with the `json` codec, committed at `data/kidneyloop/`, so judges can read `graph.json` and `git diff` shows what each matching round decided.
 - Blood-type rules (`ABO_CAN_GIVE_TO`) and antibody to antigen links are graph data; Cypher derives every `COMPATIBLE` edge and each patient's pool PRA (the share of pool donors their antibodies rule out).
 - Multi-hop Cypher enumerates 2-way and 3-way cycles (38,332 on the committed pool) and walks the paths behind each explanation.
-- Transactions with rollback power the what-if; read-only opens power `why` and the MCP server.
+- Transactions with rollback power the what-if and the counterfactuals; read-only opens power `why`, `audit`, `simulate` and the MCP server.
 - `relate serve --mcp stdio --read-only` and `@relate/relate-wasm` serve the same graph to agents and to the browser.
 
 ### What connects to what
@@ -46,11 +48,11 @@ Donor `PAIRED_WITH` Patient; Donor and Patient `HAS_BLOOD` BloodType, which `ABO
 
 ### Testing
 
-229 tests, including a brute-force optimality check of the solver on 150 random pools, Cypher cycle enumeration checked against an independent search, end-to-end runs of the real CLI and MCP server, and a mutation check that plants eight bugs and confirms the suite catches each. CI runs all of it on Linux.
+478 tests, including a brute-force optimality check of the solver on 150 random pools, the expected objective checked against an exhaustive search, Cypher cycle enumeration checked against an independent search, reproducibility across row order and Python hash seeds, end-to-end runs of the real CLI and MCP server, and a mutation check that plants fourteen bugs and confirms the suite catches each. CI runs all of it on Linux.
 
 ### Data and safety
 
-All patients and donors are synthetic, generated from a fixed seed. The compatibility rules are simplified. This is a demonstration, not a clinical tool.
+All patients and donors are synthetic, generated from a fixed seed. The compatibility rules are simplified, pool PRA stands in for CPRA, and the failure model assumes independent transplants; the simulation measures the gain if that model is right. This is a demonstration, not a clinical tool.
 
 ## Built with
 

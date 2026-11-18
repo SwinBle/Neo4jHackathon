@@ -97,3 +97,21 @@ def test_refuses_a_matched_patient_or_a_pool_without_a_run(graph_of):
     run_match(conn, max_cycle=2)
     with pytest.raises(ValueError):
         counterfactual(conn, "P2")
+
+
+def test_requiring_the_patient_shows_who_pays_for_it(graph_of):
+    """P1-P2 and P2-P3 are the only cycles and share P2; P3's longer wait wins the tie-break."""
+    patients = [patient("P1", antibodies=["A2"], wait_days=10), patient("P2"), patient("P3", antibodies=["A3"], wait_days=1000)]
+    donors = [
+        donor("D1", antigens=["A3"], paired_with="P1"),
+        donor("D2", antigens=["B8"], paired_with="P2"),
+        donor("D3", antigens=["A2"], paired_with="P3"),
+    ]
+    conn = graph_of(patients, donors)
+    run_match(conn, max_cycle=2)
+    before = conn.execute(STATE).single()
+    cf = counterfactual(conn, "P1", antigens=0)
+    trial = by_change(cf)["P1 required in the plan"]
+    assert cf.matched(trial) and trial.plan.transplants == 2 and cf.lost(trial) == {"P3"}
+    assert "First change that gets P1 matched: P1 required in the plan; P3 would lose a kidney." in render(cf)
+    assert conn.execute(STATE).single() == before

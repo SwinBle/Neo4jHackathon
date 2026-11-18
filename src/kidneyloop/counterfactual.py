@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import relate
 
@@ -98,6 +98,11 @@ def counterfactual(
     inputs = read_inputs(conn, max_cycle, progress, policy)
     longer = max_chain + 1
     trials.append(Trial(f"chains of up to {longer} instead of {max_chain}", "", solve_with_progress(inputs, longer, progress, objective)))
+    # Make serving the patient worth more than any number of other transplants, so the
+    # solver includes them whenever any exchange can; the transplant delta is the price.
+    forced = replace(inputs, weight={**inputs.weight, patient_id: inputs.weight[patient_id] + len(inputs.weight) + 1})
+    progress(f"Solving with {patient_id} required...")
+    trials.append(Trial(f"{patient_id} required in the plan", "", solve_with_progress(forced, max_chain, progress, objective)))
     if max_cycle == 2:
         wider = read_inputs(conn, 3, progress, policy)
         trials.append(Trial("3-way cycles allowed", "", solve_with_progress(wider, max_chain, progress, objective)))
