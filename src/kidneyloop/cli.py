@@ -43,7 +43,11 @@ def build(
     if pairs < 1 or altruists < 0:
         typer.echo("--pairs must be at least 1 and --altruists at least 0.", err=True)
         raise typer.Exit(2)
-    create_json_store(store)
+    try:
+        create_json_store(store)
+    except FileExistsError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(2)
     with relate.connect(str(store)) as conn:
         load_pool(conn, generate_pool(seed, pairs, altruists))
         derive(conn)

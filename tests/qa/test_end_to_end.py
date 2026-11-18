@@ -113,6 +113,21 @@ def test_cli_rejects_bad_input_with_a_clear_message(store_copy, args, code, mess
     assert message in result.stderr
 
 
+def test_build_refuses_to_replace_a_folder_that_is_not_a_store(tmp_path):
+    keep = tmp_path / "notes"
+    keep.mkdir()
+    (keep / "important.txt").write_text("keep me")
+    result = kx("build", "--store", str(keep), "--pairs", "5", cwd=tmp_path)
+    assert result.returncode == 2 and "not a Relate store" in result.stderr
+    assert (keep / "important.txt").read_text() == "keep me"
+
+
+def test_build_replaces_an_existing_store(tmp_path):
+    for _ in range(2):
+        result = kx("build", "--store", str(tmp_path / "s"), "--pairs", "5", cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+
+
 def test_commands_on_a_missing_store_say_to_build_first(tmp_path):
     result = kx("match", "--store", str(tmp_path / "nothing"), cwd=tmp_path)
     assert result.returncode == 2 and "kx build" in result.stderr

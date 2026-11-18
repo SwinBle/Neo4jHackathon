@@ -85,6 +85,8 @@ def create_json_store(path: Path) -> None:
     store is created, so the CLI makes the empty store and Python writes into it.
     """
     if path.exists():
+        if not (path / "manifest.json").exists() or not (path / ".cypherlite.lock").exists():
+            raise FileExistsError(f"{path} exists and is not a Relate store; refusing to replace it")
         shutil.rmtree(path)
     subprocess.run(
         [relate_cli(), "--database", str(path), "--snapshot-format", "json", "--mode", "envelope", "RETURN 1"],
