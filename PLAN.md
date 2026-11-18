@@ -68,7 +68,7 @@ Relationships:
 | Language | Python | Fast to build, easy for judges to install |
 | Store | Directory store, `json` codec, committed | Judges can read `graph.json`; git diff shows each matching round |
 | Compatibility | ABO plus synthetic HLA antibodies | Unmatched explanations become multi-hop paths |
-| Selection | Cypher enumerates cycles; the ILP (`pulp`) builds chains from compatible arcs and selects | Enumerating chains does not scale: seed 42 has 47,572 length-2 chains, and length-3 enumeration hits the engine's 256 MB value limit |
+| Selection | Cypher enumerates cycles; the ILP (HiGHS via `scipy.optimize.milp`; `pulp` 3 imports numpy without declaring it) builds chains from compatible arcs and selects | Enumerating chains does not scale: seed 42 has 47,572 length-2 chains, and length-3 enumeration hits the engine's 256 MB value limit |
 | Objective | Max transplants, tie-break on high cPRA and wait time | Weights stored on `MatchRun` |
 | Limits | Cycles up to 3, chains up to 4 | Source to cite in README, or state as our choice |
 | Data | Seeded generator, 300 pairs and 10 altruistic donors | Reproducible runs |

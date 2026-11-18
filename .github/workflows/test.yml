@@ -1,0 +1,28 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    env:
+      DO_NOT_TRACK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install relate CLI
+        run: |
+          curl -sSfL https://relatedb.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: relate --version
+      - run: pip install -e ".[dev]"
+      - name: Unit and end-to-end QA
+        run: pytest -m "not qa_full"
+      - name: Committed store
+        run: pytest -m qa_full
+      - name: Mutation check
+        run: python scripts/mutation_check.py
