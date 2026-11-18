@@ -23,18 +23,23 @@ class Exchange:
 
 
 def _cycle_query(length: int) -> str:
-    hops = "".join(
-        f"-[:COMPATIBLE]->(p{i}:Patient)<-[:PAIRED_WITH]-(d{i}:Donor)" for i in range(2, length + 1)
-    )
-    distinct = " AND ".join(f"p1.id < p{i}.id" for i in range(2, length + 1))
-    if length == 3:
-        distinct += " AND p2 <> p3"
+    """Cycles whose first patient has the smallest id, so each cycle appears once.
+
+    One MATCH per hop lets each WHERE prune before the next hop expands; a single
+    long pattern with the filters at the end measured about twice as slow on the
+    300-pair store.
+    """
+    stages = ["MATCH (d1:Donor)-[:PAIRED_WITH]->(p1:Patient), (d1)-[:COMPATIBLE]->(p2:Patient) WHERE p1.id < p2.id"]
+    for i in range(2, length):
+        earlier = " AND ".join(f"p{i + 1} <> p{j}" for j in range(2, i + 1))
+        stages.append(
+            f"MATCH (d{i}:Donor)-[:PAIRED_WITH]->(p{i}), (d{i})-[:COMPATIBLE]->(p{i + 1}:Patient) "
+            f"WHERE p1.id < p{i + 1}.id AND {earlier}"
+        )
+    stages.append(f"MATCH (d{length}:Donor)-[:PAIRED_WITH]->(p{length}), (d{length})-[:COMPATIBLE]->(p1)")
     donors = ", ".join(f"d{i}.id" for i in [length, *range(1, length)])
     patients = ", ".join(f"p{i}.id" for i in range(1, length + 1))
-    return (
-        f"MATCH (p1:Patient)<-[:PAIRED_WITH]-(d1:Donor){hops}-[:COMPATIBLE]->(p1) "
-        f"WHERE {distinct} RETURN [{donors}] AS donors, [{patients}] AS patients"
-    )
+    return " ".join(stages) + f" RETURN [{donors}] AS donors, [{patients}] AS patients"
 
 
 @dataclass(frozen=True)

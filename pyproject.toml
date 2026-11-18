@@ -12,7 +12,7 @@ license = "MIT"
 dependencies = [
     "relate-db==1.1.0",
     "typer>=0.12",
-    "pulp>=2.8",
+    "scipy>=1.11",
 ]
 
 [project.optional-dependencies]
