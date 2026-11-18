@@ -5,11 +5,12 @@ from typing import Iterator
 import relate
 import typer
 
+from .counterfactual import counterfactual as find_counterfactual, render as render_counterfactual
 from .exchanges import find_arcs, find_cycles
 from .explain import explain, render
 from .generator import generate_pool
 from .policy import DEFAULT_POLICY_FILE, Policy, PolicyError, load_policy
-from .runs import run_match
+from .runs import check_inputs, latest_run_id, run_match, run_record
 from .simulate import render as render_simulation, simulate as simulate_plans
 from .solver import OBJECTIVES, Objective
 from .store import create_json_store, derive, load_pool
@@ -105,6 +106,13 @@ def options(store: Path = DEFAULT_STORE, max_cycle: int = 3) -> None:
     typer.echo(f"altruistic arcs: {sum(a.altruistic for a in arcs)}, pair arcs: {sum(not a.altruistic for a in arcs)}")
 
 
+def warn_if_stale(conn: relate.Connection) -> None:
+    run = latest_run_id(conn)
+    warning = check_inputs(conn, run).warning() if run else None
+    if warning:
+        typer.echo(warning)
+
+
 def check_objective(objective: str) -> Objective:
     if objective not in OBJECTIVES:
         raise fail(f"--objective must be one of {', '.join(OBJECTIVES)}.", 2)
@@ -164,6 +172,7 @@ def why(patient: str, store: Path = DEFAULT_STORE) -> None:
             result = explain(conn, patient.strip().upper())
         except KeyError as e:
             raise fail(str(e.args[0]), 1)
+        warn_if_stale(conn)
     for line in render(result):
         typer.echo(line)
 
@@ -176,6 +185,7 @@ def whatif(withdraw: str = typer.Option(..., help="Donor id to withdraw"), store
             result = withdraw_donor(conn, withdraw.strip().upper(), progress)
         except (KeyError, LookupError) as e:
             raise fail(str(e.args[0]), 1)
+        warn_if_stale(conn)
     typer.echo(f"If {result.donor} withdraws from {result.run}:")
     if result.leaving:
         typer.echo(f"  {result.leaving} leaves the exchange with their donor")
@@ -194,6 +204,44 @@ def whatif(withdraw: str = typer.Option(..., help="Donor id to withdraw"), store
         f"{len(result.fresh_moved)} of them moved to a different donor"
     )
     typer.echo("  (rolled back; the store is unchanged)")
+
+
+@app.command()
+def counterfactual(patient: str, store: Path = DEFAULT_STORE) -> None:
+    """For an unmatched patient, re-solve with single changes that might match them; antibody changes are rolled back."""
+    with open_store(store, read_only=False) as conn:
+        try:
+            result = find_counterfactual(conn, patient.strip().upper(), progress)
+        except (KeyError, LookupError, ValueError) as e:
+            raise fail(str(e.args[0]), 1)
+        warn_if_stale(conn)
+    for line in render_counterfactual(result):
+        typer.echo(line)
+
+
+@app.command()
+def audit(run: str = typer.Argument(None, help="Run id; the latest run if omitted"), store: Path = DEFAULT_STORE) -> None:
+    """Check whether the pool still matches the inputs a run was solved on (read-only)."""
+    with open_store(store, read_only=True) as conn:
+        run_id = run.strip().upper() if run else latest_run_id(conn)
+        if run_id is None:
+            raise fail("no matching run recorded yet; run `kx match` first", 1)
+        try:
+            record = run_record(conn, run_id)
+        except KeyError as e:
+            raise fail(str(e.args[0]), 1)
+        check = check_inputs(conn, run_id)
+    typer.echo(f"{run_id}, created {record['created_at']}")
+    typer.echo(f"  policy: {record.get('policy') or 'not recorded'} (sha256 {record.get('policy_sha256') or 'not recorded'})")
+    typer.echo(f"  objective: {record['objective']}")
+    typer.echo(f"  solver: {record['solver']}")
+    typer.echo(f"  limits: cycles of up to {record['max_cycle']}, chains of up to {record['max_chain']}")
+    typer.echo(f"  stored input hash:  {check.stored or 'not recorded (run predates input hashing)'}")
+    typer.echo(f"  current input hash: {check.current}")
+    if check.stored is None:
+        typer.echo("  cannot tell whether inputs changed since this run")
+    else:
+        typer.echo("  inputs unchanged" if check.unchanged else "  inputs changed since this run")
 
 
 if __name__ == "__main__":

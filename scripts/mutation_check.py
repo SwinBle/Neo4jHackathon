@@ -89,6 +89,27 @@ MUTATIONS = [
         "steps",
         ["tests/test_simulate.py"],
     ),
+    (
+        "input hash ignores compatible edges",
+        "src/kidneyloop/runs.py",
+        '        "compatible": sorted([r["donor"], r["patient"]] for r in conn.execute(HASH_ARCS)),\n',
+        "",
+        ["tests/test_audit.py"],
+    ),
+    (
+        "counterfactual commits instead of rolling back",
+        "src/kidneyloop/counterfactual.py",
+        "            conn.rollback()\n",
+        "            conn.commit()\n",
+        ["tests/test_counterfactual.py"],
+    ),
+    (
+        "counterfactual ignores the run's cycle limit",
+        "src/kidneyloop/counterfactual.py",
+        "            inputs = read_inputs(conn, max_cycle, progress, policy)\n",
+        "            inputs = read_inputs(conn, 3, progress, policy)\n",
+        ["tests/test_counterfactual.py"],
+    ),
 ]
 
 

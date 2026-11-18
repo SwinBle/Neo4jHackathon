@@ -28,7 +28,7 @@ The relationships that matter are who can give to whom (`COMPATIBLE`), why (bloo
 | `Donor {id, altruistic}` | `(Donor or Patient)-[:HAS_BLOOD]->(BloodType)` |
 | `BloodType {name}` | `(BloodType)-[:ABO_CAN_GIVE_TO]->(BloodType)` |
 | `Antigen {name}` | `(Donor)-[:HAS_ANTIGEN]->(Antigen)`, `(Patient)-[:HAS_ANTIBODY]->(Antigen)` |
-| `MatchRun {id, seq, created_at, objective, policy, policy_sha256, solver, transplants, ...}` | `(Donor)-[:COMPATIBLE]->(Patient)`, derived in Cypher from the two rules above |
+| `MatchRun {id, seq, created_at, objective, objective_kind, policy, policy_sha256, input_sha256, solver, transplants, ...}` | `(Donor)-[:COMPATIBLE]->(Patient)`, derived in Cypher from the two rules above |
 | `Exchange {id, kind, size}` | `(MatchRun)-[:SELECTED]->(Exchange)-[:INCLUDES {order, role}]->(Donor or Patient)` |
 
 The blood-type and antibody rules are data in the graph, not code. Cypher derives from them every `COMPATIBLE` edge and each patient's `pool_pra`, the share of this pool's donors their antibodies rule out. Pool PRA plays the role cPRA plays in real programs, but it is not the clinical cPRA, which is computed against a reference donor population. A test checks the derived edges against an independent Python implementation of the same rules.
@@ -37,8 +37,8 @@ Relate capabilities used:
 
 - **Embedded Python client** (`relate-db`). It builds the store, runs the matching queries, and runs the transactions.
 - **Multi-hop Cypher patterns.** They enumerate 2-way and 3-way cycles, and explain a patient by walking blood-type and antibody paths.
-- **Transactions with rollback.** `kx whatif` deletes a donor, repairs the plan and compares it with a full re-plan inside one transaction, then rolls it back.
-- **Read-only opens.** `kx why`, `kx options` and the MCP server open the store read-only.
+- **Transactions with rollback.** `kx whatif` deletes a donor, repairs the plan and compares it with a full re-plan inside one transaction, then rolls it back. `kx counterfactual` removes one antibody, re-derives `COMPATIBLE` and re-solves inside a transaction, then rolls it back.
+- **Read-only opens.** `kx why`, `kx audit`, `kx options` and the MCP server open the store read-only.
 - **MCP server.** `relate serve --mcp stdio --read-only` gives any MCP agent `read_cypher` and `get_schema` over the store ([`.mcp.json`](.mcp.json)).
 - **WebAssembly build.** The [web explorer](web/) replays `graph.json` into Relate in a browser tab and runs the same Cypher as the CLI.
 
@@ -63,6 +63,7 @@ kx why P071
 ```
 
 ```text
+Note: R1 was recorded without an input hash, so a change to the pool since cannot be detected.
 P071: blood type O; antibodies rule out 86% of this pool's donors (pool PRA)
 Not matched in R1.
 68 donors have a blood type that can give to O.
@@ -75,6 +76,8 @@ Reason: every one of those cycles needs a patient the plan already serves, e.g. 
 ```bash
 kx why P001                 # a matched patient: the exchange that serves them
 kx whatif --withdraw D085   # repair the plan without donor D085, then roll back
+kx counterfactual P071      # single changes that would get P071 matched, each verified by a re-solve
+kx audit                    # has the pool changed since the latest run was solved?
 kx options                  # candidate cycles and arcs for a round
 kx match                    # solve again and record a new MatchRun
 kx simulate                 # replay the count plan and the failure-aware plan on sampled outcomes (read-only)
@@ -95,7 +98,60 @@ If D085 withdraws from R1:
 
 A paired donor who withdraws takes their patient out of the exchange, because that patient no longer brings a kidney to trade. Real programs do not reshuffle accepted matches when one donor drops out, since every new donor-patient pairing needs a fresh crossmatch. So `kx whatif` keeps every exchange the withdrawal leaves intact and re-plans only the freed and unmatched patients, with the latest run's cycle and chain limits. It also reports what a from-scratch re-plan would do. Here that would match two more patients but move 155 patients to a different donor, a trade-off the coordinator can now see.
 
-Patient and donor ids are case-insensitive. `kx match` and `kx whatif` print each stage and its time to stderr while they run. They took 30 to 60 seconds on the author's Windows laptop for the 300-pair pool. Most of that time goes to cycle enumeration in Cypher and the exact integer program. `kx why` answers in under a second.
+Patient and donor ids are case-insensitive. `kx match` and `kx whatif` print each stage and its time to stderr while they run. They took 30 to 60 seconds on the author's Windows laptop for the 300-pair pool. Most of that time goes to cycle enumeration in Cypher and the exact integer program. `kx why` answers in under a second. `kx counterfactual` re-solves the pool once per change it tries, up to five times, and took about 4 minutes for P071.
+
+### Auditing a run
+
+Every `kx match` stores an `input_sha256` on its `MatchRun`: a SHA-256 of what the solver read, namely each patient's id, `pool_pra`, `wait_days` and blood type, each donor's id, blood type, altruistic flag and paired patient, every `COMPATIBLE` arc, and the run's cycle limit, chain limit, policy hash and objective. Rows are sorted by id first, so the hash does not depend on the order Relate returns them or on Python's hash seed; tests check both. The run also stores `objective_kind` (`count` or `expected`) next to the readable `objective` text.
+
+`kx audit [RUN]` (the latest run by default) recomputes the hash from the store as it is now and compares. `kx why`, `kx whatif` and `kx counterfactual` print a warning line first when the pool changed since the latest run, because their answer may then be stale. Output from a copy of the committed store after `kx match` recorded R2, and again after P071's `wait_days` was raised by 30:
+
+```text
+$ kx audit
+R2, created 2026-11-18T16:43:31+00:00
+  policy: default (sha256 7a0bfdc90249ebfacb163e3378bb71913d36ba6b98a7221cbe10e6066b7e9e00)
+  objective: max transplants; tie-break from policy default
+  solver: HiGHS via scipy.optimize.milp
+  limits: cycles of up to 3, chains of up to 4
+  stored input hash:  ce0fcf623b4e44c412e59b3192395cbb4df5fba017ee10683b5dd73bca0b1ce4
+  current input hash: ce0fcf623b4e44c412e59b3192395cbb4df5fba017ee10683b5dd73bca0b1ce4
+  inputs unchanged
+$ kx audit R2
+  ...
+  stored input hash:  ce0fcf623b4e44c412e59b3192395cbb4df5fba017ee10683b5dd73bca0b1ce4
+  current input hash: e227987548a4a6a02ed1ca6a77b2174dd31f61d33f7a735d985215b1cd6b1e99
+  inputs changed since this run
+$ kx why P071
+Warning: the pool changed since R2 was recorded, so this answer may be stale (see `kx audit R2`).
+P071: blood type O; antibodies rule out 86% of this pool's donors (pool PRA)
+...
+```
+
+The committed run R1 was recorded before input hashing, so for R1 `kx audit` prints `cannot tell whether inputs changed since this run` and `kx why` prints the `Note:` line shown above. The hash covers solver inputs only. A changed antibody or antigen that has not been re-derived into `COMPATIBLE` edges does not change it.
+
+### Counterfactuals
+
+`kx counterfactual P071` asks which single change would get an unmatched patient into the plan, and checks each candidate by re-solving the whole pool with the latest run's cycle and chain limits, policy and objective. A run recorded before policies existed (R1) is re-solved with `policies/default.json`, which reproduces its weights. The candidates are bounded:
+
+1. Without one of the patient's antibodies, for the three antigens that block the most blood-compatible donors (as in `kx why`). The `HAS_ANTIBODY` edge is deleted, every `COMPATIBLE` edge and `pool_pra` is re-derived with the store's own Cypher rules, and the pool is re-solved, all inside a transaction that is rolled back. If dropping the antibody opens no donor, because each donor it blocks carries another antigen the patient reacts to, that change is reported and not re-solved.
+2. Chains one transplant longer than the run allowed.
+3. 3-way cycles, if the run allowed only 2-way ones.
+
+For each change it reports the transplant count against the recorded run, every patient who would lose their kidney, and how many would move to a different donor. On a copy of the committed store (about 4 minutes):
+
+```text
+Note: R1 was recorded without an input hash, so a change to the pool since cannot be detected.
+P071 is not matched in R1 (count objective, policy default, cycles of up to 3, chains of up to 4: 193 transplants).
+Single changes, each checked by re-solving the whole pool:
+  without the antibody to A2 (it blocks 19 blood-compatible donors): opens 5 donors; P071 still unmatched; 193 -> 193 transplants (+0); lose a kidney: none; 142 moved to a different donor
+  without the antibody to DR14 (it blocks 19 blood-compatible donors): opens 6 donors; P071 still unmatched; 193 -> 193 transplants (+0); lose a kidney: none; 146 moved to a different donor
+  without the antibody to DR12 (it blocks 16 blood-compatible donors): opens 4 donors; P071 still unmatched; 193 -> 193 transplants (+0); lose a kidney: none; 151 moved to a different donor
+  chains of up to 5 instead of 4: P071 still unmatched; 193 -> 193 transplants (+0); lose a kidney: none; 159 moved to a different donor
+No single change tried gets P071 matched.
+(antibody changes rolled back; the store is unchanged)
+```
+
+So for P071 the honest answer is no: each antibody change opens four to six donors, but the optimal plan still has 193 transplants and still leaves P071 out. P090, with no cycle through it in R1, gets the same answer. Tests on small pools built so the answer is known check the other outcomes: a dropped antibody that matches the patient and names the patient who loses a kidney, a longer chain that reaches the patient, 3-way cycles that help a 2-cycle run, and a case where no single change helps.
 
 To rebuild the store from scratch, install the relate CLI ([install guide](https://relatedb.ai/docs/get-started/install)) and run `kx build` (seed 42, 300 pairs, 10 altruistic donors), then `kx match`. `kx build` with the same seed writes a byte-identical `graph.json`. `kx match` then adds a `MatchRun` whose `created_at` is the time of the run, and it picks the same exchanges every time for the same pool: when several plans tie, the solver's input order is fixed, so the choice does not depend on row order or Python's hash seed. `kx build` refuses to replace a folder that is not a Relate store.
 
@@ -187,22 +243,22 @@ What this shows, and what it does not:
 - It does **not** help the most sensitized patients. In the 75-100% pool PRA band it realises 13.3 transplants per round against 14.3 for the count plan, and 13.4 against 15.0 under the OPTN-inspired policy. The other three bands gain.
 - The OPTN-inspired tie-break alone raises the count plan from 49.9 to 59.3 realised transplants. Plans that tie on 193 planned transplants differ a lot in how many survive.
 - The simulation draws outcomes from the same success model the expected plan optimises, so it measures the gain if that model is right. It does not test failure rates that differ from the model. The model is synthetic: pool PRA is not CPRA, and the cited rates come from other pools.
-- `kx whatif` still re-plans with the default policy and the count objective.
+- `kx whatif` still re-plans with the default policy and the count objective. `kx counterfactual` uses the run's own policy and objective.
 
 ## Testing and QA
 
 ```bash
-pytest -m "not qa_full"       # 458 tests, about 40 s
+pytest -m "not qa_full"       # 476 tests, about 50 s
 pytest -m qa_full             # the committed 300-pair store, about 2 min
 python scripts/mutation_check.py
 ```
 
-- **Unit tests.** Blood-type and antibody rules, pool PRA, cycle uniqueness, the recorded run reading back, explanations and what-if.
+- **Unit tests.** Blood-type and antibody rules, pool PRA, cycle uniqueness, the recorded run reading back, explanations, what-if, the input hash (unchanged pool, a changed edge or wait, load order, hash seed) and counterfactuals on pools whose answer is known by construction, including one where no single change helps.
 - **Solver against brute force.** On 150 random small pools the solver's plan obeys every rule and equals the optimum of an independent exhaustive search. The expected objective is checked against an exhaustive search for the exact expected optimum.
 - **Policies and simulation.** The default policy reproduces the original weights bit for bit, every shipped policy keeps the tie-break below one transplant, a malformed policy names the bad field, and simulated cycles and chains succeed and stop as the model says.
 - **Cypher against reference.** Cycles found by Cypher equal cycles found by an independent Python search on generated pools.
 - **End-to-end QA** (`tests/qa`). The real CLI runs on a fresh store. Tests cover reproducible builds, the relate CLI reading what Python wrote, a recorded run that obeys every rule with no unused cycle or altruist left, read-only commands and what-if leaving the store files unchanged, error exits, the MCP server, and the web page running the same Cypher as the CLI.
-- **Mutation check.** `scripts/mutation_check.py` plants eleven known bugs one at a time, including a plan that changes with row order or Python's hash seed, an expected objective that ignores chain position, and a simulated chain that continues past a failure, and confirms the suite fails on each.
+- **Mutation check.** `scripts/mutation_check.py` plants fourteen known bugs one at a time, including a plan that changes with row order or Python's hash seed, an expected objective that ignores chain position, a simulated chain that continues past a failure, an input hash that ignores `COMPATIBLE` edges, and a counterfactual that commits instead of rolling back, and confirms the suite fails on each.
 
 [docs/QA.md](docs/QA.md) lists the browser checks done by hand on the web explorer.
 

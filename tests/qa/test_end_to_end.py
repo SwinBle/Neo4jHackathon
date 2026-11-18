@@ -105,6 +105,7 @@ def test_whatif_replans_without_the_donor_and_changes_no_file(store_copy):
     [
         (["why", "P999"], 1, "no patient P999"),
         (["whatif", "--withdraw", "D999"], 1, "no donor D999"),
+        (["counterfactual", "P999"], 1, "no patient P999"),
         (["match", "--max-cycle", "4"], 2, "--max-cycle must be 2 or 3"),
         (["options", "--max-cycle", "1"], 2, "--max-cycle must be 2 or 3"),
     ],
@@ -215,3 +216,37 @@ def test_bad_policy_file_names_the_field(store_copy, tmp_path):
     bad.write_text(json.dumps({"name": "x", "tie_break": [{"kind": "lottery"}], "success": {}}))
     result = kx("match", "--store", str(store_copy), "--policy", str(bad), cwd=store_copy.parent)
     assert result.returncode == 2 and "tie_break[0].kind" in result.stderr
+
+
+def test_audit_reports_unchanged_inputs_then_flags_a_changed_pool(store_copy):
+    result = kx("audit", "--store", str(store_copy), cwd=store_copy.parent)
+    assert result.returncode == 0, result.stderr
+    assert "R1, created" in result.stdout and "inputs unchanged" in result.stdout
+    with relate.connect(str(store_copy)) as conn:
+        conn.execute("MATCH (p:Patient {id: 'P001'}) SET p.wait_days = p.wait_days + 1")
+        donor = latest_plan(conn).exchanges[0].donors[0]
+    result = kx("audit", "R1", "--store", str(store_copy), cwd=store_copy.parent)
+    assert "inputs changed since this run" in result.stdout
+    for args in (["why", "P001"], ["whatif", "--withdraw", donor]):
+        result = kx(*args, "--store", str(store_copy), cwd=store_copy.parent)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.startswith("Warning: the pool changed since R1 was recorded")
+
+
+def test_audit_of_an_unknown_run_exits_1(store_copy):
+    result = kx("audit", "R9", "--store", str(store_copy), cwd=store_copy.parent)
+    assert result.returncode == 1 and "no run R9" in result.stderr
+
+
+def test_counterfactual_rolls_back_and_changes_no_file(store_copy):
+    with relate.connect(str(store_copy), read_only=True) as conn:
+        served = latest_plan(conn).matched_patients
+        unmatched = sorted(set(read_inputs(conn).weight) - served)[0]
+    before = fingerprint(store_copy)
+    result = kx("counterfactual", unmatched, "--store", str(store_copy), cwd=store_copy.parent)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith(f"{unmatched} is not matched in R1") and "store is unchanged" in result.stdout
+    assert {k: v for k, v in fingerprint(store_copy).items() if not k.startswith("wal")} == {
+        k: v for k, v in before.items() if not k.startswith("wal")
+    }
+    assert kx("audit", "--store", str(store_copy), cwd=store_copy.parent).stdout.count("inputs unchanged") == 1
