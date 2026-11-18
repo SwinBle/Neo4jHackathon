@@ -23,7 +23,7 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 70ch; }
 section { margin-top: 28px; }
 h2 { font-size: 17px; margin: 0 0 10px; }
 #status { color: var(--muted); font-size: 13px; }
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; }
 .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
 .stat strong { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
 .stat span { color: var(--muted); font-size: 13px; }
@@ -39,8 +39,6 @@ svg { width: 100%; height: auto; display: block; }
 .label { font-size: 9px; text-anchor: middle; fill: var(--ink); }
 .edge { stroke: var(--muted); stroke-width: 1.4; }
 #arrow path { fill: var(--muted); }
-.tools { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-@media (max-width: 760px) { .tools { grid-template-columns: 1fr; } }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
 form { display: flex; gap: 8px; flex-wrap: wrap; }
 input, textarea, button.action { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
@@ -65,6 +63,21 @@ figure { margin: 10px 0 0; max-width: 320px; }
 figcaption { margin-top: 2px; }
 .steps { margin: 8px 0 0; padding-left: 20px; }
 button.link { font: inherit; color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; }
+main { max-width: 1320px; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 20px; align-items: start; }
+.inspector { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; display: grid; gap: 12px; margin-top: 28px; }
+.inspector .card { padding: 12px 14px; }
+.inspector h2 { font-size: 15px; }
+.pick-label { margin: 10px 0 0; }
+#why p { margin: 6px 0; font-size: 14px; }
+.exchange.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+@media (max-width: 980px) {
+  .layout { display: flex; flex-direction: column; }
+  .primary { display: contents; }
+  .primary > :first-child { order: 1; }
+  .inspector { order: 2; position: static; max-height: none; overflow: visible; margin-top: 0; }
+  .primary > :nth-child(n + 2) { order: 3; }
+}
 </style>
 </head>
 <body>
@@ -88,56 +101,62 @@ button.link { font: inherit; color: var(--accent); background: none; border: non
     </ol>
   </section>
 
-  <section aria-labelledby="run-h">
-    <h2 id="run-h">Latest matching run</h2>
-    <div id="summary" class="stats"></div>
-    <p id="run-meta"></p>
-  </section>
+  <div class="layout">
+    <div class="primary">
+      <section aria-labelledby="run-h">
+        <h2 id="run-h">Latest matching run</h2>
+        <div id="summary" class="stats"></div>
+        <p id="run-meta"></p>
+      </section>
 
-  <section class="tools">
-    <div class="card" aria-labelledby="why-h">
-      <h2 id="why-h">Why was this patient matched or not?</h2>
-      <form id="why-form">
-        <label for="patient" class="muted">Patient id</label>
-        <input id="patient" value="P071" size="8" autocomplete="off">
-        <button class="action" type="submit">Explain</button>
-      </form>
-      <div id="why"></div>
-    </div>
-    <div class="card" aria-labelledby="whatif-h">
-      <h2 id="whatif-h">What if a donor withdraws?</h2>
-      <form id="whatif-form">
-        <label for="donor" class="muted">Donor id</label>
-        <input id="donor" value="D001" size="8" autocomplete="off">
-        <button class="action" type="submit">Withdraw</button>
-        <button class="action secondary" id="reset" type="button">Reload graph</button>
-      </form>
-      <div id="whatif-out"></div>
-    </div>
-  </section>
+      <section aria-labelledby="ex-h">
+        <h2 id="ex-h">Chosen exchanges</h2>
+        <p class="muted">Each arrow is a donor giving to the next patient. Dashed circles are altruistic donors who start a chain. Select an exchange to inspect it.</p>
+        <div class="chips" role="group" aria-label="Show exchanges">
+          <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+          <button type="button" class="chip" data-filter="cycle" aria-pressed="false">Cycles</button>
+          <button type="button" class="chip" data-filter="chain" aria-pressed="false">Chains</button>
+          <span id="exchange-count" class="muted"></span>
+        </div>
+        <div id="exchanges" class="grid"></div>
+      </section>
 
-  <section aria-labelledby="ex-h">
-    <h2 id="ex-h">Chosen exchanges</h2>
-    <p class="muted">Each arrow is a donor giving to the next patient. Dashed circles are altruistic donors who start a chain. Select an exchange to see who gives to whom.</p>
-    <div class="chips" role="group" aria-label="Show exchanges">
-      <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
-      <button type="button" class="chip" data-filter="cycle" aria-pressed="false">Cycles</button>
-      <button type="button" class="chip" data-filter="chain" aria-pressed="false">Chains</button>
-      <span id="exchange-count" class="muted"></span>
+      <section class="card" aria-labelledby="console-h">
+        <h2 id="console-h">Cypher console</h2>
+        <div class="chips" role="group" aria-label="Example queries" id="examples"></div>
+        <form id="console-form">
+          <textarea id="statement" aria-label="Cypher statement"></textarea>
+          <button class="action" type="submit">Run</button>
+        </form>
+        <div id="console-out"></div>
+      </section>
     </div>
-    <div id="exchanges" class="grid"></div>
-  </section>
 
-  <section class="card" aria-labelledby="console-h">
-    <h2 id="console-h">Cypher console</h2>
-    <form id="console-form">
-      <textarea id="statement" aria-label="Cypher statement">MATCH (p:Patient)-[:HAS_ANTIBODY]->(a:Antigen)
-RETURN a.name AS antigen, count(p) AS patients
-ORDER BY patients DESC LIMIT 10</textarea>
-      <button class="action" type="submit">Run</button>
-    </form>
-    <div id="console-out"></div>
-  </section>
+    <aside class="inspector" aria-label="Inspector">
+      <div class="card" aria-labelledby="why-h">
+        <h2 id="why-h">Why was this patient matched or not?</h2>
+        <form id="why-form">
+          <label for="patient" class="muted">Patient id</label>
+          <input id="patient" value="P071" size="8" autocomplete="off" list="patient-ids">
+          <datalist id="patient-ids"></datalist>
+          <button class="action" type="submit">Explain</button>
+        </form>
+        <p class="muted pick-label">Unmatched and hardest to match (highest cPRA):</p>
+        <div class="chips" id="hard-picks"></div>
+        <div id="why"></div>
+      </div>
+      <div class="card" aria-labelledby="whatif-h">
+        <h2 id="whatif-h">What if a donor withdraws?</h2>
+        <form id="whatif-form">
+          <label for="donor" class="muted">Donor id</label>
+          <input id="donor" value="D085" size="8" autocomplete="off">
+          <button class="action" type="submit">Withdraw</button>
+          <button class="action secondary" id="reset" type="button">Reload graph</button>
+        </form>
+        <div id="whatif-out"></div>
+      </div>
+    </aside>
+  </div>
 </main>
 <script type="module" src="./app.js"></script>
 </body>

@@ -46,6 +46,8 @@ MATCH (p:Patient {id: $id})<-[:PAIRED_WITH]-(:Donor)-[:COMPATIBLE]->(p2:Patient)
 WHERE p2 <> p3 AND p2 <> p AND p3 <> p
 RETURN [p.id, p2.id, p3.id] AS patients`;
 
+export const PATIENT_INDEX = `MATCH (p:Patient) RETURN p.id AS id, p.cpra AS cpra ORDER BY p.cpra DESC, id`;
+
 export const ALTRUISTS_FOR = `MATCH (n:Donor {altruistic: true})-[:COMPATIBLE]->(:Patient {id: $id}) RETURN n.id AS id ORDER BY id`;
 
 export const DONOR_EXISTS = `MATCH (d:Donor {id: $id}) RETURN count(d) AS n`;

@@ -35,7 +35,7 @@ const el = (tag, attrs = {}, ...children) => {
   return node;
 };
 
-const state = { snapshot: null, run: null, exchanges: [], holder: new Map(), giver: new Map(), withdrawn: null, filter: 'all' };
+const state = { snapshot: null, run: null, exchanges: [], holder: new Map(), giver: new Map(), withdrawn: null, filter: 'all', selected: null };
 
 async function load() {
   $('#status').textContent = 'Loading graph.json into Relate (WebAssembly)…';
@@ -71,6 +71,20 @@ async function showRun() {
   );
   $('#run-meta').textContent = `${summary.run} · ${summary.solver} · ${summary.objective}`;
   drawExchanges();
+  await fillPatientPickers();
+}
+
+async function fillPatientPickers() {
+  const patients = await rows(Q.PATIENT_INDEX);
+  $('#patient-ids').replaceChildren(...patients.map((p) => el('option', { value: p.id })));
+  const hardest = patients.filter((p) => !state.holder.has(p.id)).slice(0, 8);
+  $('#hard-picks').replaceChildren(
+    ...hardest.map((p) => el('button', { type: 'button', class: 'chip', onclick: () => explain(p.id) }, `${p.id} · ${Math.round(p.cpra * 100)}%`)),
+  );
+}
+
+function revealInspector() {
+  if (matchMedia('(max-width: 980px)').matches) $('#why-h').scrollIntoView({ block: 'start' });
 }
 
 const stat = (value, label) => el('div', { class: 'stat' }, el('strong', {}, String(value)), el('span', {}, label));
@@ -83,7 +97,12 @@ function drawExchanges() {
     ...shown.map((e) =>
       el(
         'button',
-        { class: `exchange ${broken.has(e.id) ? 'broken' : ''}`, onclick: () => showExchange(e), 'aria-label': `Show ${e.id}, ${e.kind} of ${e.patients.length}` },
+        {
+          class: `exchange ${broken.has(e.id) ? 'broken' : ''} ${state.selected === e.id ? 'selected' : ''}`,
+          onclick: () => showExchange(e),
+          'aria-label': `Show ${e.id}, ${e.kind} of ${e.patients.length}`,
+          'aria-pressed': String(state.selected === e.id),
+        },
         el('span', { class: 'ex-id' }, `${e.id} · ${e.kind} of ${e.patients.length}`),
         exchangeSvg(e),
       ),
@@ -98,7 +117,9 @@ function showExchange(e) {
     figure(exchangeSvg(e), e.kind === 'chain' ? 'An altruistic donor (dashed) starts the chain.' : 'Each pair\'s donor gives to the next patient.'),
     el('ol', { class: 'steps' }, steps),
   );
-  $('#why-h').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  state.selected = e.id;
+  drawExchanges();
+  revealInspector();
 }
 
 const patientButton = (id) => el('button', { class: 'link', type: 'button', onclick: () => explain(id) }, id);
@@ -154,6 +175,7 @@ async function explain(id) {
   }
   const { lines, figures } = await whyLines(id, profile);
   out.replaceChildren(...lines.map((l) => el('p', {}, l)), ...figures);
+  revealInspector();
 }
 
 // Mirrors render() in src/kidneyloop/explain.py line for line, so `kx why` and the page agree.
@@ -257,6 +279,26 @@ $('#why-form').addEventListener('submit', (ev) => { ev.preventDefault(); explain
 $('#whatif-form').addEventListener('submit', (ev) => { ev.preventDefault(); withdraw($('#donor').value); });
 $('#reset').addEventListener('click', () => { $('#whatif-out').replaceChildren(); load(); });
 $('#console-form').addEventListener('submit', (ev) => { ev.preventDefault(); runConsole(); });
+const EXAMPLES = [
+  ['Antigens that block most patients', `MATCH (p:Patient)-[:HAS_ANTIBODY]->(a:Antigen)
+RETURN a.name AS antigen, count(p) AS patients
+ORDER BY patients DESC LIMIT 10`],
+  ['Who can give to P071', `MATCH (d:Donor)-[:COMPATIBLE]->(:Patient {id: 'P071'})
+OPTIONAL MATCH (d)-[:PAIRED_WITH]->(own:Patient)
+RETURN d.id AS donor, own.id AS donor_came_with, d.altruistic AS altruistic`],
+  ['Exchanges in the latest run', `MATCH (r:MatchRun)-[:SELECTED]->(e:Exchange)
+RETURN r.id AS run, e.kind AS kind, e.size AS size, count(*) AS exchanges
+ORDER BY run DESC, kind, size`],
+  ['Blood-type rules', `MATCH (g:BloodType)-[:ABO_CAN_GIVE_TO]->(r:BloodType)
+RETURN g.name AS donor_blood, collect(r.name) AS can_give_to`],
+];
+
+$('#statement').value = EXAMPLES[0][1];
+$('#examples').replaceChildren(
+  ...EXAMPLES.map(([label, statement]) =>
+    el('button', { type: 'button', class: 'chip', onclick: () => { $('#statement').value = statement; runConsole(); } }, label),
+  ),
+);
 for (const chip of document.querySelectorAll('[data-filter]')) {
   chip.addEventListener('click', () => {
     state.filter = chip.dataset.filter;
