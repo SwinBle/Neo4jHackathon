@@ -133,46 +133,65 @@ async function explain(id) {
     out.replaceChildren(el('p', { class: 'warn' }, `No patient ${id}.`));
     return;
   }
+  out.replaceChildren(...(await whyLines(id, profile)).map((l) => el('p', {}, l)));
+}
+
+// Mirrors render() in src/kidneyloop/explain.py line for line, so `kx why` and the page agree.
+async function whyLines(id, profile) {
+  const lines = [`${id}: blood type ${profile.blood}, cPRA ${Math.round(profile.cpra * 100)}% of pool donors ruled out by antibodies`];
+  const ex = state.exchanges.find((e) => e.patients.includes(id));
+  if (ex) {
+    lines.push(`Matched in ${state.run} by ${ex.id} (${ex.kind} of ${ex.patients.length}): ${ex.donors.map((d, i) => `${d} -> ${ex.patients[i]}`).join(', ')}`);
+    return lines;
+  }
   const [abo] = await rows(Q.ABO_DONORS, { id });
   const antigens = await rows(Q.BLOCKING_ANTIGENS, { id });
   const [incoming] = await rows(Q.INCOMING, { id });
-  const cycles = (await rows(Q.CYCLES_THROUGH, { id })).map((r) => r.patients);
-  const lines = [
-    `${id}: blood type ${profile.blood}, cPRA ${Math.round(profile.cpra * 100)}% of pool donors ruled out by antibodies.`,
-  ];
-  const ex = state.exchanges.find((e) => e.patients.includes(id));
-  if (ex) {
-    lines.push(`Matched in ${state.run} by ${ex.id} (${ex.kind} of ${ex.patients.length}): ${ex.donors.map((d, i) => `${d} → ${ex.patients[i]}`).join(', ')}.`);
-  } else {
-    lines.push(`Not matched in ${state.run}.`);
-    lines.push(`${abo.n} donors have a blood type that can give to ${profile.blood}.`);
-    if (antigens.length) lines.push(`Antibody hits among them: ${antigens.slice(0, 5).map((a) => `${a.antigen} (${a.donors})`).join(', ')}.`);
-    lines.push(`${incoming.n} donors can give to ${id} (${incoming.altruistic ?? 0} altruistic).`);
-    if (incoming.n === 0) {
-      lines.push(abo.n === 0 ? 'Reason: no donor has a compatible blood type.' : 'Reason: every blood-compatible donor carries an antigen the patient has antibodies to.');
-    } else if (profile.own_donor && profile.own_donor_can_give === 0) {
-      lines.push(`Reason: own donor ${profile.own_donor} can give to nobody, so ${id} can only end a chain.`);
-    } else {
-      lines.push(`${cycles.length} cycles of up to 3 pairs pass through ${id}.`);
-      const taken = [...new Set(cycles.flatMap((c) => c.slice(1)).filter((p) => state.holder.has(p)))];
-      if (cycles.length) lines.push(`Reason: those cycles need patients the plan already serves, e.g. ${taken.slice(0, 5).map((p) => `${p} in ${state.holder.get(p)}`).join('; ')}.`);
-    }
+  lines.push(state.run ? `Not matched in ${state.run}.` : 'No matching run recorded yet.');
+  lines.push(`${abo.n} donors have a blood type that can give to ${profile.blood}.`);
+  if (antigens.length) lines.push(`Antibody hits among them: ${antigens.slice(0, 5).map((a) => `${a.antigen} (${a.donors} donors)`).join(', ')}.`);
+  lines.push(`${incoming.n} donors can give to ${id} (${incoming.altruistic ?? 0} altruistic).`);
+  if (incoming.n === 0) {
+    lines.push(`Reason: ${abo.n === 0 ? 'no donor has a compatible blood type' : 'every blood-compatible donor carries an antigen the patient has antibodies to'}.`);
+    return lines;
   }
-  out.replaceChildren(...lines.map((l) => el('p', {}, l)));
+  if (profile.own_donor && profile.own_donor_can_give === 0) {
+    lines.push(`Reason: own donor ${profile.own_donor} can give to nobody in the pool, so ${id} can only be the last patient of a chain.`);
+    return lines;
+  }
+  const altruists = (await rows(Q.ALTRUISTS_FOR, { id })).map((r) => r.id);
+  if (altruists.length) {
+    lines.push(`Altruistic donors who could start a chain here: ${altruists.map((n) => (state.giver.has(n) ? `${n} started ${state.giver.get(n)}` : `${n} unused`)).join('; ')}.`);
+  }
+  const cycles = (await rows(Q.CYCLES_THROUGH, { id })).map((r) => r.patients);
+  lines.push(`${cycles.length} cycles of up to 3 pairs pass through ${id}.`);
+  const takenBy = new Map();
+  for (const c of cycles) for (const p of c.slice(1)) if (state.holder.has(p) && !takenBy.has(p)) takenBy.set(p, state.holder.get(p));
+  const free = cycles.filter((c) => !c.slice(1).some((p) => takenBy.has(p)));
+  if (cycles.length && !free.length) {
+    lines.push(`Reason: every one of those cycles needs a patient the plan already serves, e.g. ${[...takenBy].slice(0, 5).map(([p, x]) => `${p} in ${x}`).join('; ')}.`);
+  } else if (free.length) {
+    lines.push(`Reason: none found. ${free.length} cycles need no served patient, e.g. ${free[0].join(' -> ')}; a run with a smaller cycle limit would skip them.`);
+  } else {
+    lines.push('Reason: no cycle closes back to this pair, and no chain reached it in the chosen plan.');
+  }
+  return lines;
 }
 
 async function withdraw(id) {
   id = id.trim().toUpperCase();
   const out = $('#whatif-out');
-  const [{ removed }] = await rows(Q.WITHDRAW, { id });
-  if (!removed) {
+  const [{ n }] = await rows(Q.DONOR_EXISTS, { id });
+  if (!n) {
     out.replaceChildren(el('p', { class: 'warn' }, `No donor ${id} in this tab's graph.`));
     return;
   }
+  const [{ leaving }] = await rows(Q.WITHDRAW, { id });
   const broken = state.exchanges.filter((e) => e.donors.includes(id));
   state.withdrawn = { id, broken: broken.map((e) => e.id) };
-  const stranded = broken.flatMap((e) => strandedBy(e, id));
+  const stranded = broken.flatMap((e) => strandedBy(e, id)).filter((p) => p !== leaving);
   out.replaceChildren(
+    leaving ? el('p', {}, `${leaving} leaves the exchange with their donor.`) : null,
     el('p', {}, broken.length
       ? `${id} withdrew: ${broken.map((e) => `${e.id} (${e.kind})`).join(', ')} can no longer run as planned. Patients who were waiting on ${id}'s kidney or on a donor after it: ${stranded.join(', ')}.`
       : `${id} withdrew: no chosen exchange used this donor.`),

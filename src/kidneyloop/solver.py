@@ -100,7 +100,7 @@ def solve(inputs: MatchInputs, max_chain: int = 4) -> Plan:
     """
     cycles = list(inputs.cycles)
     paired_donors = set(inputs.donor_of.values())
-    first = [a for a in inputs.arcs if a.altruistic]
+    first = [a for a in inputs.arcs if a.altruistic] if max_chain >= 1 else []
     later = [a for a in inputs.arcs if not a.altruistic and a.donor in paired_donors]
     chain_vars = [(a, 1) for a in first] + [(a, k) for k in range(2, max_chain + 1) for a in later]
 

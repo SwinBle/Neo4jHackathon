@@ -105,6 +105,7 @@ def test_whatif_replans_without_the_donor_and_changes_no_file(store_copy):
         (["why", "P999"], 1, "no patient P999"),
         (["whatif", "--withdraw", "D999"], 1, "no donor D999"),
         (["match", "--max-cycle", "4"], 2, "--max-cycle must be 2 or 3"),
+        (["options", "--max-cycle", "1"], 2, "--max-cycle must be 2 or 3"),
     ],
 )
 def test_cli_rejects_bad_input_with_a_clear_message(store_copy, args, code, message):
@@ -126,6 +127,30 @@ def test_build_replaces_an_existing_store(tmp_path):
     for _ in range(2):
         result = kx("build", "--store", str(tmp_path / "s"), "--pairs", "5", cwd=tmp_path)
         assert result.returncode == 0, result.stderr
+
+
+def test_ids_are_case_insensitive(built_store):
+    result = kx("why", "p001", "--store", str(built_store), cwd=built_store.parent)
+    assert result.returncode == 0 and result.stdout.startswith("P001:")
+
+
+def test_second_writer_gets_a_clear_message(store_copy):
+    with relate.connect(str(store_copy)):
+        result = kx("match", "--store", str(store_copy), cwd=store_copy.parent)
+    assert result.returncode == 5 and "open for writing by another process" in result.stderr
+
+
+def test_build_without_relate_cli_keeps_the_existing_store(store_copy, monkeypatch):
+    import kidneyloop.store as store_module
+
+    def missing():
+        raise RuntimeError("The relate CLI is needed")
+
+    monkeypatch.setattr(store_module, "relate_cli", missing)
+    before = fingerprint(store_copy)
+    with pytest.raises(RuntimeError):
+        store_module.create_json_store(store_copy)
+    assert fingerprint(store_copy) == before
 
 
 def test_commands_on_a_missing_store_say_to_build_first(tmp_path):

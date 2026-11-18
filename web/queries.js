@@ -46,6 +46,13 @@ MATCH (p:Patient {id: $id})<-[:PAIRED_WITH]-(:Donor)-[:COMPATIBLE]->(p2:Patient)
 WHERE p2 <> p3 AND p2 <> p AND p3 <> p
 RETURN [p.id, p2.id, p3.id] AS patients`;
 
-export const WITHDRAW = `MATCH (d:Donor {id: $id}) DETACH DELETE d RETURN count(*) AS removed`;
+export const ALTRUISTS_FOR = `MATCH (n:Donor {altruistic: true})-[:COMPATIBLE]->(:Patient {id: $id}) RETURN n.id AS id ORDER BY id`;
 
-export const DONORS = `MATCH (d:Donor) RETURN d.id AS id, d.altruistic AS altruistic ORDER BY id`;
+export const DONOR_EXISTS = `MATCH (d:Donor {id: $id}) RETURN count(d) AS n`;
+
+export const WITHDRAW = `
+MATCH (d:Donor {id: $id})
+OPTIONAL MATCH (d)-[:PAIRED_WITH]->(p:Patient)
+WITH d, p, p.id AS leaving
+DETACH DELETE d, p
+RETURN leaving`;

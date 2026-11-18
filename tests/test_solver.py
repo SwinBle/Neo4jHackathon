@@ -57,6 +57,12 @@ def test_tie_break_never_costs_a_transplant():
     assert worst_extra < 1.0
 
 
+def test_max_chain_zero_allows_no_chain():
+    pairs = [("D1", "P1")]
+    plan = solve(inputs_from([("N1", "P1")], pairs), max_chain=0)
+    assert plan.transplants == 0
+
+
 def test_empty_pool_gives_empty_plan():
     assert solve(MatchInputs((), (), {}, {})).transplants == 0
 

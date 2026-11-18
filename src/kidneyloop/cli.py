@@ -1,4 +1,6 @@
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 import relate
 import typer
@@ -20,10 +22,28 @@ def main() -> None:
     """KidneyLoop: kidney paired-donation matching on a Relate graph."""
 
 
-def _require(store: Path) -> None:
+def fail(message: str, code: int) -> typer.Exit:
+    typer.echo(message, err=True)
+    return typer.Exit(code)
+
+
+@contextmanager
+def open_store(store: Path, read_only: bool) -> Iterator[relate.Connection]:
     if not (store / "manifest.json").exists():
-        typer.echo(f"No store at {store}. Run `kx build` first.", err=True)
-        raise typer.Exit(2)
+        raise fail(f"No store at {store}. Run `kx build` first.", 2)
+    try:
+        conn = relate.connect(str(store), read_only=read_only)
+    except relate.OperationalError as e:
+        if "locked" in str(e):
+            raise fail(f"{store} is open for writing by another process; wait for it to finish.", 5)
+        raise
+    with conn:
+        yield conn
+
+
+def check_cycle_limit(max_cycle: int) -> None:
+    if not 2 <= max_cycle <= 3:
+        raise fail("--max-cycle must be 2 or 3.", 2)
 
 
 @app.command()
@@ -41,14 +61,12 @@ def build(
 ) -> None:
     """Generate a synthetic pool and write it, with derived compatibility, to a new store."""
     if pairs < 1 or altruists < 0:
-        typer.echo("--pairs must be at least 1 and --altruists at least 0.", err=True)
-        raise typer.Exit(2)
+        raise fail("--pairs must be at least 1 and --altruists at least 0.", 2)
     try:
         create_json_store(store)
-    except FileExistsError as e:
-        typer.echo(str(e), err=True)
-        raise typer.Exit(2)
-    with relate.connect(str(store)) as conn:
+    except (FileExistsError, RuntimeError) as e:
+        raise fail(str(e), 2)
+    with open_store(store, read_only=False) as conn:
         load_pool(conn, generate_pool(seed, pairs, altruists))
         derive(conn)
         counts = conn.execute(
@@ -62,8 +80,8 @@ def build(
 @app.command()
 def options(store: Path = DEFAULT_STORE, max_cycle: int = 3) -> None:
     """Count the cycles and arcs a matching round can choose from."""
-    _require(store)
-    with relate.connect(str(store), read_only=True) as conn:
+    check_cycle_limit(max_cycle)
+    with open_store(store, read_only=True) as conn:
         cycles = find_cycles(conn, max_cycle)
         arcs = find_arcs(conn)
     for size in range(2, max_cycle + 1):
@@ -74,11 +92,10 @@ def options(store: Path = DEFAULT_STORE, max_cycle: int = 3) -> None:
 @app.command()
 def match(store: Path = DEFAULT_STORE, max_cycle: int = 3, max_chain: int = 4) -> None:
     """Choose disjoint cycles and chains and record them as a new MatchRun."""
-    _require(store)
-    if not 2 <= max_cycle <= 3 or max_chain < 0:
-        typer.echo("--max-cycle must be 2 or 3 and --max-chain at least 0.", err=True)
-        raise typer.Exit(2)
-    with relate.connect(str(store)) as conn:
+    check_cycle_limit(max_cycle)
+    if max_chain < 0:
+        raise fail("--max-chain must be at least 0.", 2)
+    with open_store(store, read_only=False) as conn:
         run = run_match(conn, max_cycle, max_chain)
         patients = conn.execute("MATCH (p:Patient) RETURN count(p) AS n").single()["n"]
     cycles = [e for e in run.plan.exchanges if e.kind == "cycle"]
@@ -91,13 +108,11 @@ def match(store: Path = DEFAULT_STORE, max_cycle: int = 3, max_chain: int = 4) -
 @app.command()
 def why(patient: str, store: Path = DEFAULT_STORE) -> None:
     """Explain, from graph paths, why a patient was or was not matched."""
-    _require(store)
-    with relate.connect(str(store), read_only=True) as conn:
+    with open_store(store, read_only=True) as conn:
         try:
-            result = explain(conn, patient)
+            result = explain(conn, patient.strip().upper())
         except KeyError as e:
-            typer.echo(str(e.args[0]), err=True)
-            raise typer.Exit(1)
+            raise fail(str(e.args[0]), 1)
     for line in render(result):
         typer.echo(line)
 
@@ -105,14 +120,14 @@ def why(patient: str, store: Path = DEFAULT_STORE) -> None:
 @app.command()
 def whatif(withdraw: str = typer.Option(..., help="Donor id to withdraw"), store: Path = DEFAULT_STORE) -> None:
     """Re-plan as if a donor withdrew, inside a transaction that is rolled back."""
-    _require(store)
-    with relate.connect(str(store)) as conn:
+    with open_store(store, read_only=False) as conn:
         try:
-            result = withdraw_donor(conn, withdraw)
+            result = withdraw_donor(conn, withdraw.strip().upper())
         except (KeyError, LookupError) as e:
-            typer.echo(str(e.args[0]), err=True)
-            raise typer.Exit(1)
+            raise fail(str(e.args[0]), 1)
     typer.echo(f"If {result.donor} withdraws from {result.run}:")
+    if result.leaving:
+        typer.echo(f"  {result.leaving} leaves the exchange with their donor")
     if result.broken:
         for ex_id, e in result.broken:
             typer.echo(f"  {ex_id} breaks ({e.kind} of {e.size}: {', '.join(e.patients)})")

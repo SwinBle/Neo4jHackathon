@@ -84,15 +84,18 @@ def create_json_store(path: Path) -> None:
     The Python client has no option for the codec, and the codec is fixed when the
     store is created, so the CLI makes the empty store and Python writes into it.
     """
+    cli = relate_cli()
     if path.exists():
         if not (path / "manifest.json").exists() or not (path / ".cypherlite.lock").exists():
             raise FileExistsError(f"{path} exists and is not a Relate store; refusing to replace it")
         shutil.rmtree(path)
-    subprocess.run(
-        [relate_cli(), "--database", str(path), "--snapshot-format", "json", "--mode", "envelope", "RETURN 1"],
-        check=True,
+    made = subprocess.run(
+        [cli, "--database", str(path), "--snapshot-format", "json", "--mode", "envelope", "RETURN 1"],
         capture_output=True,
+        text=True,
     )
+    if made.returncode != 0:
+        raise RuntimeError(f"relate could not create {path}: {made.stderr.strip() or made.stdout.strip()}")
 
 
 def load_pool(conn: relate.Connection, pool: Pool) -> None:

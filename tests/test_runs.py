@@ -73,7 +73,8 @@ def test_whatif_rolls_back_and_reports_the_broken_exchange(graph_of):
     before = conn.execute(COUNTS).single()
     result = withdraw_donor(conn, "D2")
     assert [e for _, e in result.broken] == [Exchange("cycle", ("D2", "D1"), ("P1", "P2"))]
-    assert result.lost == {"P1", "P2"}
+    assert result.leaving == "P2"
+    assert result.lost == {"P1"}
     assert conn.execute(COUNTS).single() == before
     assert conn.execute("MATCH (d:Donor {id: 'D2'}) RETURN count(d) AS n").single()["n"] == 1
 
@@ -92,8 +93,20 @@ def test_whatif_chain_keeps_patients_before_the_withdrawn_donor(graph_of):
     run_match(conn)
     result = withdraw_donor(conn, "D2")
     assert [e for _, e in result.broken] == [Exchange("chain", ("N1", "D1", "D2"), ("P1", "P2", "P3"))]
+    assert result.leaving == "P2"
     assert result.stranded == ("P3",)
-    assert result.after == {"P1", "P2"}
+    assert result.after == {"P1"}
+    assert result.lost == {"P3"}
+
+
+def test_whatif_replan_never_serves_the_withdrawn_pair_and_keeps_run_limits(graph_of):
+    patients = [patient("P1"), patient("P2"), patient("P3")]
+    donors = [donor("N1"), donor("D1", paired_with="P1"), donor("D2", paired_with="P2"), donor("D3", paired_with="P3")]
+    conn = graph_of(patients, donors)
+    run_match(conn, max_cycle=2, max_chain=0)
+    result = withdraw_donor(conn, "D1")
+    assert "P1" not in result.after
+    assert all(e.kind == "cycle" and e.size == 2 for e in result.replan.exchanges)
 
 
 def test_whatif_needs_a_run_and_a_real_donor(graph_of):

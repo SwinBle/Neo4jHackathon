@@ -79,17 +79,20 @@ kx match                    # solve again and record a new MatchRun
 
 ```text
 If D085 withdraws from R1:
+  P085 leaves the exchange with their donor
   R1-X18 breaks (cycle of 3: P011, P033, P085)
-  waiting on D085 or a donor after it: P011, P033, P085
-  re-plan: 193 -> 193 patients matched
-  lose a kidney: P167
-  newly matched: P251
+  waiting on D085 or a donor after it: P011, P033
+  re-plan: 193 -> 192 patients matched
+  lose a kidney: none
+  newly matched: none
   (rolled back; the store is unchanged)
 ```
 
-`kx match` and `kx whatif` each took about 30 to 40 seconds on the author's Windows laptop for the 300-pair pool. Most of that time is cycle enumeration in Cypher and the exact integer program.
+A paired donor who withdraws takes their patient out of the exchange, because that patient no longer brings a kidney to trade. The re-plan uses the latest run's cycle and chain limits. Here P011 and P033 find other exchanges, so the plan loses only P085.
 
-To rebuild the store from scratch, install the relate CLI ([install guide](https://relatedb.ai/docs/get-started/install)) and run `kx build` (seed 42, 300 pairs, 10 altruistic donors), then `kx match`. Rebuilding with the same seed gives a byte-identical `graph.json`.
+Patient and donor ids are case-insensitive. `kx match` and `kx whatif` took 30 to 60 seconds on the author's Windows laptop for the 300-pair pool. Most of that time goes to cycle enumeration in Cypher and the exact integer program. `kx why` answers in under a second.
+
+To rebuild the store from scratch, install the relate CLI ([install guide](https://relatedb.ai/docs/get-started/install)) and run `kx build` (seed 42, 300 pairs, 10 altruistic donors), then `kx match`. `kx build` with the same seed writes a byte-identical `graph.json`. `kx match` then adds a `MatchRun` whose `created_at` is the time of the run. `kx build` refuses to replace a folder that is not a Relate store.
 
 ### Web explorer
 
@@ -119,7 +122,7 @@ The server exposes `read_cypher` and `get_schema` only, and refuses `write_cyphe
 
 1. `find_cycles` enumerates every 2-way and 3-way cycle with one Cypher `MATCH` per hop (38,332 on the committed store).
 2. Chains are not enumerated. The same pool has 47,572 two-step chains, and enumerating three-step chains exceeded the engine's 256 MB value limit. The solver builds chains from the 19,742 `COMPATIBLE` arcs instead. It follows the position-indexed chain idea of [Dickerson, Manlove, Plaut, Sandholm and Trimble (2016)](https://arxiv.org/abs/1606.01623): one variable per arc and chain position, and a paired donor gives at position k+1 only if their own patient received at position k.
-3. The integer program is solved exactly with HiGHS through `scipy.optimize.milp`. Each transplant is worth 1, plus a tie-break below 1/(patients+1) that favours high cPRA and long waits. Summed over all patients, the tie-break stays below one transplant, so it never costs one.
+3. The integer program is solved exactly with HiGHS through `scipy.optimize.milp`. Each transplant is worth 1, plus a tie-break of at most 1/(patients+1) that favours high cPRA and long waits. Summed over all patients, the tie-break stays below one transplant, so it never costs one.
 4. Cycles are capped at 3 pairs and chains at 4 transplants. Programs cap cycle length because every transplant in a cycle needs simultaneous surgery, as surveyed in [this 2025 review](https://arxiv.org/pdf/2504.04091). The chain cap of 4 is this project's choice.
 
 The compatibility rules are simplified: ABO blood type plus a synthetic antibody to antigen match over 32 HLA antigen names. The blood-type frequencies and antibody counts in the generator are illustrative, not population statistics.
@@ -127,7 +130,7 @@ The compatibility rules are simplified: ABO blood type plus a synthetic antibody
 ## Testing and QA
 
 ```bash
-pytest -m "not qa_full"       # 198 tests, about 15 s
+pytest -m "not qa_full"       # 208 tests, about 20 s
 pytest -m qa_full             # the committed 300-pair store, about 2 min
 python scripts/mutation_check.py
 ```
