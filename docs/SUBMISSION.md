@@ -16,7 +16,7 @@ https://github.com/SwinBle/Neo4jHackathon (public, topics `relate` and `relate-n
 
 ## Demo video
 
-TODO: your YouTube or Vimeo link (public or unlisted).
+https://youtu.be/Q0-H7dtIGPE (unlisted)
 
 ## About the project
 
