@@ -16,7 +16,7 @@ https://github.com/SwinBle/Neo4jHackathon (public, topics `relate` and `relate-n
 
 ## Demo video
 
-https://youtu.be/Q0-H7dtIGPE (unlisted)
+https://youtu.be/cnwWKqEXoWQ (unlisted, 1:42)
 
 ## About the project
 
