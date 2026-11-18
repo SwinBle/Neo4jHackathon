@@ -118,3 +118,7 @@ def whatif(withdraw: str = typer.Option(..., help="Donor id to withdraw"), store
     typer.echo(f"  lose a kidney: {', '.join(sorted(result.lost)) or 'none'}")
     typer.echo(f"  newly matched: {', '.join(sorted(result.gained)) or 'none'}")
     typer.echo("  (rolled back; the store is unchanged)")
+
+
+if __name__ == "__main__":
+    app()

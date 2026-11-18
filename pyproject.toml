@@ -26,3 +26,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "qa: end-to-end checks through the real CLI, store files and MCP server",
+    "qa_full: checks the committed 300-pair store; slow",
+]

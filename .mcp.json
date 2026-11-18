@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kidneyloop": {
+      "command": "relate",
+      "args": ["serve", "--mcp", "stdio", "--database", "data/kidneyloop", "--read-only"]
+    }
+  }
+}
