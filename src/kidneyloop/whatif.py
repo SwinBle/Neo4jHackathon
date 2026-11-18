@@ -20,6 +20,18 @@ class WhatIf:
     replan_inputs: MatchInputs
 
     @property
+    def stranded(self) -> tuple[str, ...]:
+        """Patients of the current plan who were waiting on this donor or a donor after it.
+
+        A cycle needs every donor, so all its patients are stranded. A chain still
+        serves the patients before the withdrawn donor's position.
+        """
+        out: list[str] = []
+        for _, e in self.broken:
+            out.extend(e.patients if e.kind == "cycle" else e.patients[e.donors.index(self.donor):])
+        return tuple(out)
+
+    @property
     def after(self) -> frozenset[str]:
         return self.replan.matched_patients
 

@@ -6,7 +6,7 @@ from kidneyloop.runs import latest_run_id, read_inputs, run_exchanges, run_match
 from kidneyloop.solver import plan_problems
 from kidneyloop.whatif import withdraw_donor
 
-from conftest import donor, patient
+from pool_builders import donor, patient
 
 COUNTS = "MATCH (n) WITH count(n) AS nodes MATCH ()-[r]->() RETURN nodes, count(r) AS rels"
 
@@ -76,6 +76,24 @@ def test_whatif_rolls_back_and_reports_the_broken_exchange(graph_of):
     assert result.lost == {"P1", "P2"}
     assert conn.execute(COUNTS).single() == before
     assert conn.execute("MATCH (d:Donor {id: 'D2'}) RETURN count(d) AS n").single()["n"] == 1
+
+
+def test_whatif_chain_keeps_patients_before_the_withdrawn_donor(graph_of):
+    patients = [patient("P1"), patient("P2"), patient("P3")]
+    donors = [donor("N1"), donor("D1", paired_with="P1"), donor("D2", paired_with="P2"), donor("D3", paired_with="P3")]
+    conn = graph_of(patients, donors)
+    for statement in [
+        "MATCH ()-[c:COMPATIBLE]->() DELETE c",
+        "MATCH (n:Donor {id: 'N1'}), (p:Patient {id: 'P1'}) CREATE (n)-[:COMPATIBLE]->(p)",
+        "MATCH (d:Donor {id: 'D1'}), (p:Patient {id: 'P2'}) CREATE (d)-[:COMPATIBLE]->(p)",
+        "MATCH (d:Donor {id: 'D2'}), (p:Patient {id: 'P3'}) CREATE (d)-[:COMPATIBLE]->(p)",
+    ]:
+        conn.execute(statement)
+    run_match(conn)
+    result = withdraw_donor(conn, "D2")
+    assert [e for _, e in result.broken] == [Exchange("chain", ("N1", "D1", "D2"), ("P1", "P2", "P3"))]
+    assert result.stranded == ("P3",)
+    assert result.after == {"P1", "P2"}
 
 
 def test_whatif_needs_a_run_and_a_real_donor(graph_of):

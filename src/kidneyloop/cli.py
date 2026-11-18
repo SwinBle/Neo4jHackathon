@@ -112,6 +112,7 @@ def whatif(withdraw: str = typer.Option(..., help="Donor id to withdraw"), store
     if result.broken:
         for ex_id, e in result.broken:
             typer.echo(f"  {ex_id} breaks ({e.kind} of {e.size}: {', '.join(e.patients)})")
+        typer.echo(f"  waiting on {result.donor} or a donor after it: {', '.join(result.stranded)}")
     else:
         typer.echo("  no chosen exchange uses this donor")
     typer.echo(f"  re-plan: {len(result.before)} -> {len(result.after)} patients matched")

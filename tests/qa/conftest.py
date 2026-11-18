@@ -1,18 +1,12 @@
 import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
+from kx_runner import kx
+
 QA_PAIRS = 60
 QA_ALTRUISTS = 4
-
-
-def kx(*args: str, cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, "-m", "kidneyloop.cli", *args], cwd=cwd, capture_output=True, text=True, timeout=600
-    )
 
 
 @pytest.fixture(scope="session")

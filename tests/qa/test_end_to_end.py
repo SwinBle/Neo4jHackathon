@@ -12,7 +12,7 @@ from kidneyloop.solver import Plan, plan_problems, plan_value, solve
 from kidneyloop.store import relate_cli
 from kidneyloop.whatif import withdraw_donor
 
-from conftest import kx
+from kx_runner import kx
 
 pytestmark = pytest.mark.qa
 REPO = Path(__file__).resolve().parents[2]

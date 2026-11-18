@@ -1,6 +1,6 @@
 from kidneyloop.exchanges import Arc, Exchange, find_arcs, find_cycles
 
-from conftest import donor, patient
+from pool_builders import donor, patient
 
 
 def pairs(n):

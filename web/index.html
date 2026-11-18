@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KidneyLoop explorer</title>
+<style>
+:root {
+  --bg: #f6f4ef; --panel: #ffffff; --ink: #1d1f22; --muted: #646a73; --line: #d9d5cc;
+  --accent: #0f6e63; --accent-soft: #d8ece8; --on-accent: #ffffff; --warn: #a3361f; --broken: #f6dcd5; --alt: #8a5a00;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #141617; --panel: #1d2022; --ink: #e8e6e1; --muted: #9aa0a6; --line: #33383b;
+          --accent: #5cc2b2; --accent-soft: #1f3a36; --on-accent: #0b1f1c; --warn: #f08a70; --broken: #4a2620; --alt: #e0b157; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+header h1 { margin: 0; font-size: 28px; letter-spacing: -0.01em; }
+header p { margin: 4px 0 0; color: var(--muted); max-width: 70ch; }
+.notice { margin-top: 12px; padding: 8px 12px; border-left: 3px solid var(--alt); background: var(--panel); font-size: 13px; }
+section { margin-top: 28px; }
+h2 { font-size: 17px; margin: 0 0 10px; }
+#status { color: var(--muted); font-size: 13px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.stat strong { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 13px; }
+#run-meta { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.exchange { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; color: inherit; font: inherit; cursor: pointer; }
+.exchange:hover, .exchange:focus-visible { border-color: var(--accent); outline: none; }
+.exchange.broken { background: var(--broken); border-color: var(--warn); }
+.ex-id { font-size: 12px; color: var(--muted); }
+svg { width: 100%; height: auto; display: block; }
+.node { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+.node.altruist { fill: var(--panel); stroke: var(--alt); stroke-dasharray: 3 2; }
+.label { font-size: 9px; text-anchor: middle; fill: var(--ink); }
+.edge { stroke: var(--muted); stroke-width: 1.4; }
+#arrow path { fill: var(--muted); }
+.tools { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .tools { grid-template-columns: 1fr; } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+form { display: flex; gap: 8px; flex-wrap: wrap; }
+input, textarea, button.action { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
+textarea { width: 100%; min-height: 84px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+button.action { background: var(--accent); color: var(--on-accent); border-color: var(--accent); cursor: pointer; }
+button.secondary { background: transparent; color: var(--ink); border-color: var(--line); }
+.warn { color: var(--warn); }
+.muted { color: var(--muted); font-size: 13px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 6px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid var(--line); padding: 4px 8px; text-align: left; white-space: nowrap; }
+code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>KidneyLoop</h1>
+    <p>Kidney paired-donation cycles and chains, chosen on a Relate graph. Every number on this page comes from Cypher running in this tab on the committed store.</p>
+    <p class="notice">All patients and donors are synthetic. This is a demonstration, not a clinical tool.</p>
+    <p id="status" role="status">Starting…</p>
+  </header>
+
+  <svg width="0" height="0" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs></svg>
+
+  <section aria-labelledby="run-h">
+    <h2 id="run-h">Latest matching run</h2>
+    <div id="summary" class="stats"></div>
+    <p id="run-meta"></p>
+  </section>
+
+  <section class="tools">
+    <div class="card" aria-labelledby="why-h">
+      <h2 id="why-h">Why was this patient matched or not?</h2>
+      <form id="why-form">
+        <label for="patient" class="muted">Patient id</label>
+        <input id="patient" value="P071" size="8" autocomplete="off">
+        <button class="action" type="submit">Explain</button>
+      </form>
+      <div id="why"></div>
+    </div>
+    <div class="card" aria-labelledby="whatif-h">
+      <h2 id="whatif-h">What if a donor withdraws?</h2>
+      <form id="whatif-form">
+        <label for="donor" class="muted">Donor id</label>
+        <input id="donor" value="D001" size="8" autocomplete="off">
+        <button class="action" type="submit">Withdraw</button>
+        <button class="action secondary" id="reset" type="button">Reload graph</button>
+      </form>
+      <div id="whatif-out"></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="ex-h">
+    <h2 id="ex-h">Chosen exchanges</h2>
+    <p class="muted">Each arrow is a donor giving to the next patient. Dashed circles are altruistic donors who start a chain. Select one to explain its first patient.</p>
+    <div id="exchanges" class="grid"></div>
+  </section>
+
+  <section class="card" aria-labelledby="console-h">
+    <h2 id="console-h">Cypher console</h2>
+    <form id="console-form">
+      <textarea id="statement" aria-label="Cypher statement">MATCH (p:Patient)-[:HAS_ANTIBODY]->(a:Antigen)
+RETURN a.name AS antigen, count(p) AS patients
+ORDER BY patients DESC LIMIT 10</textarea>
+      <button class="action" type="submit">Run</button>
+    </form>
+    <div id="console-out"></div>
+  </section>
+</main>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

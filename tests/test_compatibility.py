@@ -4,7 +4,7 @@ from kidneyloop.generator import generate_pool
 from kidneyloop.model import can_donate
 from kidneyloop.store import derive, load_pool
 
-from conftest import donor, patient
+from pool_builders import donor, patient
 
 EDGES = "MATCH (d:Donor)-[:COMPATIBLE]->(p:Patient) RETURN d.id AS d, p.id AS p"
 
