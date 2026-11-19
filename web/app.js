@@ -91,8 +91,130 @@ async function showRun() {
   $('#run-meta').textContent = `Solver: ${summary.solver}. Objective: ${summary.objective}.`;
   drawHero(loops);
   drawExchanges();
+  await drawGaps(summary.transplants, summary.patients);
   await fillPatientPickers();
 }
+
+// Who the round leaves out: the match rate of each blood type and sensitisation band,
+// each against the round's overall rate, so a group that falls behind stands out.
+const BLOOD_ORDER = ['O', 'A', 'B', 'AB'];
+const BANDS = [[0, 0.5, '0 to 49%'], [0.5, 0.8, '50 to 79%'], [0.8, 0.95, '80 to 94%'], [0.95, 1.01, '95 to 100%']];
+const pct = (x) => `${Math.round(x * 100)}%`;
+
+function tally(patients, keyOf, keys) {
+  return keys.map(([key, label]) => {
+    const members = patients.filter((p) => keyOf(p) === key);
+    const left = members.filter((p) => !state.holder.has(p.id)).sort((a, b) => b.level - a.level || a.id.localeCompare(b.id));
+    return { key, label, total: members.length, matched: members.length - left.length, left };
+  }).filter((g) => g.total > 0);
+}
+
+async function drawGaps(matched, total) {
+  const patients = await rows(Q.PATIENT_GROUPS);
+  if (!patients.length) return;
+  const useCpra = patients.every((p) => p.cpra !== null && p.cpra !== undefined);
+  for (const p of patients) p.level = useCpra ? p.cpra : p.pool_pra;
+  const band = (x) => BANDS.findIndex(([lo, hi]) => x >= lo && x < hi);
+  const blood = tally(patients, (p) => p.blood, BLOOD_ORDER.map((b) => [b, `Type ${b}`]));
+  const bands = tally(patients, (p) => band(p.level), BANDS.map(([, , label], i) => [i, label]));
+  const overall = matched / total;
+  const measure = useCpra ? 'CPRA' : 'Pool PRA';
+  const unmatched = total - matched;
+
+  const worst = [...blood].sort((a, b) => b.left.length - a.left.length)[0];
+  const lowBand = [...bands].sort((a, b) => a.matched / a.total - b.matched / b.total)[0];
+  const share = worst.left.length === unmatched ? 'All' : `${worst.left.length} of`;
+  $('#gap-lede').replaceChildren(
+    unmatched === 0
+      ? 'Every patient is matched this round.'
+      : el('span', {},
+        el('b', {}, `${share} ${unmatched} unmatched patients have blood type ${worst.key}.`),
+        worst.key === 'O' ? ' Type O patients can only receive from type O donors. ' : ' ',
+        `By ${measure.toLowerCase().replace('cpra', 'CPRA').replace('pra', 'PRA')}, the band matched least often is ${lowBand.label}, with ${lowBand.matched} of ${lowBand.total}.`),
+  );
+
+  const bandCaption = useCpra
+    ? "Matched, by CPRA: the share of the reference donor population a patient's antibodies rule out"
+    : `Matched, by pool PRA: the share of blood-compatible pool donors ${blocker()}`;
+  $('#by-blood').replaceChildren(rateChart(blood, overall, "Matched, by the patient's blood type", 'Blood type'));
+  $('#by-band').replaceChildren(rateChart(bands, overall, bandCaption, measure));
+  $('#gap-table').replaceChildren(gapTable([['', blood], [measure, bands]]));
+  $('#gap-picks').replaceChildren();
+  $('#gap').hidden = false;
+  // The bars grow when the section scrolls into view, so the reader sees them move.
+  const grow = () => { for (const fill of document.querySelectorAll('#gap .fill')) fill.style.width = fill.dataset.width; };
+  const seen = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) { seen.disconnect(); requestAnimationFrame(grow); }
+  }, { threshold: 0.35 });
+  seen.observe($('#gap'));
+}
+
+function rateChart(groups, overall, caption, dimension) {
+  const rowsOut = groups.map((g) => {
+    const rate = g.matched / g.total;
+    const row = el('button', {
+      type: 'button', class: 'rate-row', 'aria-pressed': 'false',
+      'aria-label': `${dimension} ${g.label}: ${g.matched} of ${g.total} matched, ${pct(rate)}. Show the ${g.left.length} not matched.`,
+      onclick: () => pickGroup(row, g, dimension),
+      onmouseenter: (ev) => showTip(ev, g), onmousemove: moveTip, onmouseleave: hideTip,
+      onfocus: (ev) => showTip(ev, g), onblur: hideTip,
+    },
+    el('span', { class: 'who' }, g.label),
+    el('span', { class: 'track' },
+      el('span', { class: 'fill', 'data-width': `${rate * 100}%` }),
+      el('span', { class: 'ref', style: `left: ${overall * 100}%`, 'aria-hidden': 'true' })),
+    el('span', { class: 'val' }, pct(rate), el('span', {}, `${g.matched} of ${g.total}`)));
+    return row;
+  });
+  return el('div', {},
+    el('figcaption', {}, caption),
+    el('p', { class: 'ref-label' }, `Dashed line: the round's rate, ${pct(overall)}`),
+    el('div', { class: 'rate-rows' }, rowsOut));
+}
+
+function pickGroup(row, g, dimension) {
+  const wasOn = row.getAttribute('aria-pressed') === 'true';
+  for (const r of document.querySelectorAll('#gap .rate-row')) r.setAttribute('aria-pressed', 'false');
+  if (wasOn) { $('#gap-picks').replaceChildren(); return; }
+  row.setAttribute('aria-pressed', 'true');
+  const shown = g.left.slice(0, 24);
+  const where = dimension === 'Blood type' ? `blood type ${g.key}` : `${dimension.toLowerCase().replace('cpra', 'CPRA').replace('pra', 'PRA')} ${g.label}`;
+  $('#gap-picks').replaceChildren(
+    el('p', {}, g.left.length
+      ? `${g.left.length} not matched with ${where}, most sensitised first. Select one to see why.`
+      : `Everyone with ${where} is matched this round.`),
+    el('div', { class: 'chips' },
+      shown.map((p) => el('button', { type: 'button', class: 'chip', onclick: () => explain(p.id) }, p.id, el('span', { class: 'pct' }, pct(p.level)))),
+      g.left.length > shown.length ? el('span', { class: 'muted' }, `and ${g.left.length - shown.length} more`) : null),
+  );
+}
+
+function gapTable(sections) {
+  return el('table', {},
+    el('thead', {}, el('tr', {}, ['Group', 'Patients', 'Matched', 'Not matched', 'Rate'].map((h) => el('th', { scope: 'col' }, h)))),
+    sections.map(([name, groups]) => el('tbody', {},
+      groups.map((g) => el('tr', {},
+        el('th', { scope: 'row' }, name ? `${name} ${g.label}` : g.label),
+        [g.total, g.matched, g.left.length].map((n) => el('td', { class: 'num' }, String(n))),
+        el('td', { class: 'num' }, pct(g.matched / g.total)))))));
+}
+
+let tip = null;
+function showTip(ev, g) {
+  tip ??= document.body.appendChild(el('div', { class: 'tip', 'aria-hidden': 'true' }));
+  tip.replaceChildren(el('b', {}, g.label), el('br'), `${g.matched} matched, ${g.left.length} not matched, of ${g.total}`);
+  tip.hidden = false;
+  moveTip(ev);
+}
+function moveTip(ev) {
+  if (!tip) return;
+  const box = ev.currentTarget.getBoundingClientRect();
+  const x = ev.clientX || box.left + box.width / 2;
+  const y = ev.clientY || box.top;
+  tip.style.left = `${Math.max(8, Math.min(x + 14, innerWidth - tip.offsetWidth - 8))}px`;
+  tip.style.top = `${Math.max(8, y - tip.offsetHeight - 10)}px`;
+}
+function hideTip() { if (tip) tip.hidden = true; }
 
 // The hero shows one real loop from this run, drawn arrow by arrow: the fastest way
 // to see what a paired exchange is.
@@ -401,6 +523,12 @@ async function runConsole() {
 
 $('#why-form').addEventListener('submit', (ev) => { ev.preventDefault(); explain($('#patient').value); });
 $('#whatif-form').addEventListener('submit', (ev) => { ev.preventDefault(); withdraw($('#donor').value); });
+$('#gap-toggle').addEventListener('click', () => {
+  const open = $('#gap-table').hidden;
+  $('#gap-table').hidden = !open;
+  $('#gap-toggle').setAttribute('aria-expanded', String(open));
+  $('#gap-toggle').textContent = open ? 'Hide the table' : 'Show as a table';
+});
 $('#reset').addEventListener('click', () => { $('#whatif-out').replaceChildren(); load(); });
 const THEMES = { dark: 'Light theme', light: 'Dark theme' };
 const currentTheme = () => document.documentElement.dataset.theme ?? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');

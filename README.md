@@ -174,7 +174,7 @@ python -m http.server 8000
 
 Add `?snapshot=<path>` to open another store's `graph.json`, for example `web/?snapshot=../data/preflib-111/graph.json`.
 
-Open <http://localhost:8000/web/>. The page loads `data/kidneyloop/graph.json` into Relate's WebAssembly build in a worker. It shows the latest run as cycle and chain diagrams you can filter and open. It explains any patient with the same text as `kx why`, plus a drawing of the cycles that could serve them, with the patient highlighted and the blocking patients marked. It can withdraw a donor in the tab's copy, and it has a Cypher console. The browser has no solver, so the page shows what breaks and points to `kx whatif` for the re-plan.
+Open <http://localhost:8000/web/>. The page loads `data/kidneyloop/graph.json` into Relate's WebAssembly build in a worker. It shows the latest run as cycle and chain diagrams you can filter and open, and the match rate of each blood type and sensitisation band against the round's rate; selecting a group lists its unmatched patients. On the committed pool all 107 unmatched patients have blood type O. It explains any patient with the same text as `kx why`, plus a drawing of the cycles that could serve them, with the patient highlighted and the blocking patients marked. It can withdraw a donor in the tab's copy, and it has a Cypher console. The browser has no solver, so the page shows what breaks and points to `kx whatif` for the re-plan.
 
 ### Agents over MCP
 

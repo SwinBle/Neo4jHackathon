@@ -46,6 +46,11 @@ MATCH (p:Patient {id: $id})<-[:PAIRED_WITH]-(:Donor)-[:COMPATIBLE]->(p2:Patient)
 WHERE p2 <> p3 AND p2 <> p AND p3 <> p
 RETURN [p.id, p2.id, p3.id] AS patients`;
 
+// Page only: each patient's group for the "who this round leaves out" charts.
+export const PATIENT_GROUPS = `
+MATCH (p:Patient)-[:HAS_BLOOD]->(b:BloodType)
+RETURN p.id AS id, b.name AS blood, p.pool_pra AS pool_pra, p.cpra AS cpra`;
+
 export const PATIENT_INDEX = `MATCH (p:Patient) RETURN p.id AS id, p.pool_pra AS pool_pra ORDER BY p.pool_pra DESC, id`;
 
 export const ALTRUISTS_FOR = `MATCH (n:Donor {altruistic: true})-[:COMPATIBLE]->(:Patient {id: $id}) RETURN n.id AS id ORDER BY id`;

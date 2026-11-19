@@ -143,6 +143,34 @@ button.link { font: 13.5px var(--mono); color: var(--served); background: none; 
 #hard-picks .chip, #examples .chip { font-family: var(--mono); font-size: 12.5px; }
 #examples .chip { font-family: var(--sans); }
 
+/* Who is left out: match rate per group, one bar per group against the round's rate */
+.gap-lede { font-size: 17px; margin: 4px 0 18px; max-width: 70ch; }
+.gap-lede b { font-weight: 500; }
+.gap-charts { display: grid; grid-template-columns: 1fr; gap: 26px; margin: 0; }
+@media (min-width: 1100px) { .gap-charts { grid-template-columns: 1fr 1fr; gap: 18px 48px; } }
+.rate-chart { margin: 0; max-width: none; }
+.rate-chart figcaption { font-size: 14px; color: var(--muted); margin-bottom: 10px; }
+.rate-rows { position: relative; display: grid; gap: 2px; }
+.rate-row { display: grid; grid-template-columns: 6.5em minmax(0, 1fr) 7.5em; align-items: center; gap: 12px; padding: 7px 8px; margin: 0 -8px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.rate-row:hover, .rate-row[aria-pressed="true"] { background: var(--raised); }
+.rate-row .who { font-size: 14px; }
+.rate-row .val { font: 500 14px var(--mono); text-align: right; white-space: nowrap; }
+.rate-row .val span { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.track { position: relative; height: 10px; border-radius: 0 4px 4px 0; background: var(--raised); }
+.rate-row:hover .track, .rate-row[aria-pressed="true"] .track { background: var(--line); }
+.fill { position: absolute; inset: 0 auto 0 0; border-radius: 0 4px 4px 0; background: var(--served); width: 0; transition: width 900ms cubic-bezier(.2,.7,.2,1); }
+.fill.low { background: var(--blocked); }
+.ref { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 1.5px dashed var(--ink); opacity: .55; pointer-events: none; }
+.ref-label { font: 12px var(--mono); color: var(--muted); margin: 0 0 4px; }
+.gap-picks { margin-top: 18px; min-height: 1px; }
+.gap-picks p { margin: 0 0 4px; font-size: 14px; }
+.gap-table { margin-top: 16px; }
+.gap-table table { border-collapse: collapse; font-size: 14px; }
+.gap-table th, .gap-table td { padding: 4px 14px 4px 0; text-align: left; }
+.gap-table td.num { font-family: var(--mono); text-align: right; }
+.tip { position: fixed; z-index: 20; pointer-events: none; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; font-size: 13px; box-shadow: 0 10px 30px -12px rgba(0,0,0,.5); max-width: 260px; }
+.tip b { font-weight: 500; }
+
 /* Exchanges */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
 .exchange { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 10px 4px; color: inherit; font: inherit; cursor: pointer; transition: border-color 160ms, transform 160ms, box-shadow 160ms; }
@@ -206,6 +234,10 @@ tbody tr { animation: settle 260ms both; }
 }
 @media (max-width: 560px) {
   main { padding: 0 16px 72px; }
+  .rate-row { grid-template-columns: 1fr auto; grid-template-areas: "who val" "track track"; gap: 6px 8px; }
+  .rate-row .who { grid-area: who; }
+  .rate-row .val { grid-area: val; }
+  .rate-row .track { grid-area: track; }
   .top .pill { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -254,6 +286,20 @@ tbody tr { animation: settle 260ms both; }
     <div class="bar" id="bar" role="img" aria-label="Share of patients matched"><span class="cyc"></span><span class="chn"></span><span class="rest"></span></div>
     <div class="legend" id="legend"></div>
     <p id="run-meta"></p>
+  </section>
+
+  <section aria-labelledby="gap-h" class="round" id="gap" hidden>
+    <div class="round-head">
+      <h2 id="gap-h">Who this round leaves out</h2>
+      <button class="link" id="gap-toggle" type="button" aria-expanded="false" aria-controls="gap-table">Show as a table</button>
+    </div>
+    <p class="gap-lede" id="gap-lede"></p>
+    <div class="gap-charts">
+      <figure class="rate-chart" id="by-blood"></figure>
+      <figure class="rate-chart" id="by-band"></figure>
+    </div>
+    <div class="gap-table" id="gap-table" hidden></div>
+    <div class="gap-picks" id="gap-picks" aria-live="polite"></div>
   </section>
 
   <section aria-labelledby="how-h">
