@@ -164,7 +164,7 @@ kx import-preflib 00036-00000111.dat --store data/preflib-111
 kx match --store data/preflib-111
 ```
 
-On instance 111 (128 pairs, 4,108 arcs) Cypher finds 8,953 cycles, the same count as an independent search, and `kx match` picks 83 transplants. The importer checks every arc against the blood-type rules, the declared edge count and each pair's out-degree, and it refuses what it cannot import faithfully: files with altruistic donors (PrefLib marks them as faulty, and the ones checked here break the blood-type rules) and arc weights other than 1. Dense instances of 512 pairs or more need long cycle enumeration; cycles are fetched 32 first patients at a time so no single result passes the engine's 256 MB value limit.
+On instance 111 (128 pairs, 4,108 arcs) Cypher finds 8,953 cycles, the same count as an independent search, and `kx match` picks 83 transplants. The importer checks every arc against the blood-type rules, the declared edge count and each pair's out-degree, and it refuses what it cannot import faithfully: files with altruistic donors (PrefLib marks them as faulty, and the ones checked here break the blood-type rules) and arc weights other than 1. Instance 200 (512 pairs, 63,154 arcs) has 535,344 cycles of up to 3, again the same count as an independent search. Cypher enumerates them in about 3 minutes, and HiGHS then picks 312 transplants in about 4.5 minutes (both measured while the test suite ran on the same machine). Cycles are fetched 32 first patients at a time; in one query this pool's result passed the engine's 256 MB value limit.
 
 ### Web explorer
 
@@ -257,6 +257,44 @@ What this shows, and what it does not:
 - The OPTN-inspired tie-break alone raises the count plan from 49.9 to 59.3 realised transplants. Plans that tie on 193 planned transplants differ a lot in how many survive.
 - The simulation draws outcomes from the same success model the expected plan optimises, so it measures the gain if that model is right. It does not test failure rates that differ from the model. The model is synthetic: pool PRA is not CPRA, and the cited rates come from other pools.
 - `kx whatif` still re-plans with the default policy and the count objective. `kx counterfactual` uses the run's own policy and objective.
+
+## After the match: tracking each exchange
+
+A plan is only an offer. `kx status` records what happens next, one exchange at a time, and the next `kx match` plans around it.
+
+```bash
+kx status                                          # every exchange of the latest run, with its status
+kx status R1-X5 --set accepted --note "both centres agreed"
+kx status R1-X5 --set crossmatch_failed            # prints who goes back into the pool
+```
+
+| From | Can move to |
+|---|---|
+| proposed (a new exchange) | accepted, declined, cancelled |
+| accepted | crossmatch_passed, crossmatch_failed, cancelled |
+| crossmatch_passed | scheduled, cancelled |
+| scheduled | transplanted, cancelled |
+| transplanted, declined, crossmatch_failed, cancelled | nothing; they are final |
+
+Each change sets `e.status` and appends a `StatusEvent {seq, previous, status, at, note}` through `HAD_STATUS`, so the history stays in the graph. Repeating the current status records nothing, and an illegal move names the moves allowed. Exchanges that are accepted, crossmatch_passed, scheduled or transplanted keep their patients and donors out of the next round, including each patient's own donor; declined, failed and cancelled ones release them. The next run's input hash records who was held, while a run's own audit ignores statuses set on its own exchanges, so accepting R1-X5 does not make R1 look stale. A chain's last donor leaves with their patient rather than starting a new chain, which real programs often do.
+
+## CPRA from a reference population
+
+Pool PRA counts the donors in this pool that a patient's antibodies rule out. Clinical programs use CPRA, the share of a reference donor population they rule out. `kx cpra` computes it from NMDP haplotype frequencies and stores it as `p.cpra`:
+
+```bash
+kx cpra                      # population SCSEAI (South East Asian), downloads about 40 MB once into data/cache/
+kx cpra --population EURCAU  # any population code in the NMDP file
+kx match --policy policies/default-cpra.json
+```
+
+- Formula. The OPTN policy notice defines CPRA as the sum over donor genotypes of genotype frequency times whether the genotype carries an unacceptable antigen. With haplotype frequencies and Hardy-Weinberg genotypes that sum equals 1 - (sum of frequencies of haplotypes carrying none of them)^2, which is what `kx cpra` computes; a test checks the two forms agree on random tables. Only HLA-A, B and DR count, because those are the loci KidneyLoop types. Blood type stays with the ABO rules.
+- Data. Frequencies come from the [NMDP 7-locus haplotype frequencies on Zenodo](https://zenodo.org/records/4474442) (CC BY-NC-ND 4.0), checked against the md5 Zenodo publishes. Alleles map to serologic antigens with [IPD-IMGT/HLA rel_dna_ser.txt](https://github.com/ANHIG/IMGTHLA) release 3.60.0 (CC BY-ND). Release 3.66.0 writes allele codes such as 4001 where earlier releases give the antigen (B60), so the release is pinned. Neither licence allows redistributing modified data, so both files are downloaded at run time and `data/cache/` is not committed.
+- Population. The default is SCSEAI, NMDP's South East Asian group, the closest NMDP group to a Thai donor population. OPTN weights its US populations by their share of deceased donors; KidneyLoop uses one population at a time.
+- Limits. An allele with no single serologic antigen counts as carrying none; in SCSEAI that is 0.05% of the haplotype frequency. Antibodies to associated antigens (B75, a split of B15, for example) only match donors whose allele maps to that same antigen.
+- Matching. `policies/default-cpra.json` is the default policy with `"sensitisation": "cpra"`, so the tie-break and the success model read CPRA. Without that line a policy reads pool PRA, and a store without CPRA keeps its recorded input hashes. `kx why` adds the patient's CPRA once it is set.
+
+On the committed pool the most sensitised patients score 94 to 98% CPRA against SCSEAI where their pool PRA is 99 to 100%.
 
 ## Testing and QA
 

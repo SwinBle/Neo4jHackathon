@@ -9,7 +9,7 @@ PROFILE = """
 MATCH (p:Patient {id: $id})-[:HAS_BLOOD]->(pb:BloodType)
 OPTIONAL MATCH (own:Donor)-[:PAIRED_WITH]->(p)
 OPTIONAL MATCH (own)-[:COMPATIBLE]->(target:Patient)
-RETURN pb.name AS blood, p.pool_pra AS pool_pra, own.id AS own_donor, count(target) AS own_donor_can_give
+RETURN pb.name AS blood, p.pool_pra AS pool_pra, p.cpra AS cpra, own.id AS own_donor, count(target) AS own_donor_can_give
 """
 ABO_DONORS = """
 MATCH (p:Patient {id: $id})-[:HAS_BLOOD]->(pb:BloodType)
@@ -27,6 +27,7 @@ ORDER BY donors DESC, antigen
 ALTRUISTS_FOR = "MATCH (n:Donor {altruistic: true})-[:COMPATIBLE]->(:Patient {id: $id}) RETURN n.id AS id ORDER BY id"
 INCOMING ="MATCH (d:Donor)-[:COMPATIBLE]->(:Patient {id: $id}) RETURN count(d) AS n, sum(CASE WHEN d.altruistic THEN 1 ELSE 0 END) AS altruistic"
 DATASET = "MATCH (ds:Dataset) RETURN ds.name AS name"
+CPRA_REFERENCE = "MATCH (c:CpraReference) RETURN c.population AS population"
 CYCLES_THROUGH = """
 MATCH (p:Patient {id: $id})<-[:PAIRED_WITH]-(:Donor)-[:COMPATIBLE]->(p2:Patient)<-[:PAIRED_WITH]-(:Donor)-[:COMPATIBLE]->(p)
 RETURN [p.id, p2.id] AS patients
@@ -54,6 +55,8 @@ class Why:
     taken_by: dict[str, str]
     altruists_used: dict[str, str | None]
     dataset: str | None = None
+    cpra: float | None = None
+    cpra_population: str | None = None
 
 
 def explain(conn: relate.Connection, patient_id: str) -> Why:
@@ -85,6 +88,8 @@ def explain(conn: relate.Connection, patient_id: str) -> Why:
         taken_by={p: holder[p] for c in cycles for p in c[1:] if p in holder},
         altruists_used={r["id"]: giver.get(r["id"]) for r in conn.execute(ALTRUISTS_FOR, params)},
         dataset=next((r["name"] for r in conn.execute(DATASET)), None),
+        cpra=profile["cpra"],
+        cpra_population=next((r["population"] for r in conn.execute(CPRA_REFERENCE)), None),
     )
 
 
@@ -93,6 +98,8 @@ def render(why: Why) -> list[str]:
     # said about antibodies; the blocked share comes from the missing arcs instead.
     blocker = f"the {why.dataset} arcs rule out" if why.dataset else "antibodies rule out"
     lines = [f"{why.patient}: blood type {why.blood}; {blocker} {why.pool_pra:.0%} of this pool's donors (pool PRA)"]
+    if why.cpra is not None:
+        lines[0] += f"; CPRA {why.cpra:.0%} against NMDP {why.cpra_population} haplotype frequencies"
     if why.matched_in:
         ex_id, e = why.matched_in
         steps = ", ".join(f"{d} -> {p}" for d, p in zip(e.donors, e.patients))

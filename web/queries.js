@@ -12,14 +12,14 @@ WITH e, i.order AS step, i.role AS role, x.id AS who
 ORDER BY e.id, step
 WITH e, collect(CASE WHEN role = 'donor' THEN who END) AS donors,
         collect(CASE WHEN role = 'patient' THEN who END) AS patients
-RETURN e.id AS id, e.kind AS kind, donors, patients
+RETURN e.id AS id, e.kind AS kind, coalesce(e.status, 'proposed') AS status, donors, patients
 ORDER BY id`;
 
 export const PROFILE = `
 MATCH (p:Patient {id: $id})-[:HAS_BLOOD]->(pb:BloodType)
 OPTIONAL MATCH (own:Donor)-[:PAIRED_WITH]->(p)
 OPTIONAL MATCH (own)-[:COMPATIBLE]->(target:Patient)
-RETURN pb.name AS blood, p.pool_pra AS pool_pra, own.id AS own_donor, count(target) AS own_donor_can_give`;
+RETURN pb.name AS blood, p.pool_pra AS pool_pra, p.cpra AS cpra, own.id AS own_donor, count(target) AS own_donor_can_give`;
 
 export const ABO_DONORS = `
 MATCH (p:Patient {id: $id})-[:HAS_BLOOD]->(pb:BloodType)
@@ -49,6 +49,8 @@ RETURN [p.id, p2.id, p3.id] AS patients`;
 export const PATIENT_INDEX = `MATCH (p:Patient) RETURN p.id AS id, p.pool_pra AS pool_pra ORDER BY p.pool_pra DESC, id`;
 
 export const ALTRUISTS_FOR = `MATCH (n:Donor {altruistic: true})-[:COMPATIBLE]->(:Patient {id: $id}) RETURN n.id AS id ORDER BY id`;
+
+export const CPRA_REFERENCE = `MATCH (c:CpraReference) RETURN c.population AS population`;
 
 export const DATASET = `MATCH (ds:Dataset) RETURN ds.name AS name`;
 

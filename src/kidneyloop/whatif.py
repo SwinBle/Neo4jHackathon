@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import relate
 
 from .exchanges import Exchange
-from .runs import Progress, _quiet, latest_run_id, read_inputs, run_exchanges, solve_with_progress
+from .runs import Progress, _quiet, latest_run_id, read_inputs, run_exchanges, solve_with_progress, without
 from .solver import MatchInputs, Plan
 
 # A paired donor who withdraws takes their patient out of the exchange with them:
@@ -17,7 +17,7 @@ RETURN leaving
 """
 DONOR_EXISTS = "MATCH (d:Donor {id: $id}) RETURN count(d) AS n"
 PAIRED_PATIENT = "MATCH (d:Donor {id: $id}) OPTIONAL MATCH (d)-[:PAIRED_WITH]->(p:Patient) RETURN p.id AS patient"
-RUN_LIMITS = "MATCH (r:MatchRun {id: $run}) RETURN r.max_cycle AS max_cycle, r.max_chain AS max_chain"
+RUN_LIMITS = "MATCH (r:MatchRun {id: $run}) RETURN r.max_cycle AS max_cycle, r.max_chain AS max_chain, r.seq AS seq"
 
 
 @dataclass(frozen=True)
@@ -109,8 +109,13 @@ def withdraw_donor(conn: relate.Connection, donor_id: str, progress: Progress = 
     try:
         conn.execute(WITHDRAW, {"id": donor_id})
         progress(f"Withdrew {donor_id} inside a transaction; re-enumerating cycles...")
-        inputs = read_inputs(conn, limits["max_cycle"], progress)
-        repaired = solve_with_progress(_without(inputs, kept), limits["max_chain"], progress)
+        inputs = read_inputs(conn, limits["max_cycle"], progress, before=limits["seq"])
+        kept_patients = frozenset(p for e in kept for p in e.patients)
+        kept_donors = frozenset(d for e in kept for d in e.donors)
+        # Real programs do not reshuffle accepted matches when one donor drops out:
+        # each new pairing needs a fresh crossmatch, so only the people freed by
+        # broken exchanges, plus those still unmatched, are re-planned.
+        repaired = solve_with_progress(without(inputs, kept_patients, kept_donors), limits["max_chain"], progress)
         progress("For comparison, re-planning the whole pool from scratch...")
         fresh = solve_with_progress(inputs, limits["max_chain"], progress)
     finally:
@@ -118,21 +123,3 @@ def withdraw_donor(conn: relate.Connection, donor_id: str, progress: Progress = 
         conn.autocommit = previous
     replan = Plan(tuple(kept) + repaired.exchanges)
     return WhatIf(donor_id, run, leaving, tuple(exchanges), broken, before, replan, inputs, fresh)
-
-
-def _without(inputs: MatchInputs, kept: list[Exchange]) -> MatchInputs:
-    """The pool minus everyone in an exchange that the withdrawal leaves intact.
-
-    Real programs do not reshuffle accepted matches when one donor drops out: each
-    new donor-patient pairing needs a fresh crossmatch. So only the people freed by
-    broken exchanges, plus those still unmatched, are re-planned.
-    """
-    patients = {p for e in kept for p in e.patients}
-    donors = {d for e in kept for d in e.donors}
-    return MatchInputs(
-        cycles=tuple(c for c in inputs.cycles if patients.isdisjoint(c.patients) and donors.isdisjoint(c.donors)),
-        arcs=tuple(a for a in inputs.arcs if a.patient not in patients and a.donor not in donors),
-        donor_of={p: d for p, d in inputs.donor_of.items() if p not in patients and d not in donors},
-        weight=inputs.weight,
-        success=inputs.success,
-    )

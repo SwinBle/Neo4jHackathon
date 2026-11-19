@@ -7,10 +7,10 @@ import numpy as np
 import relate
 
 from .policy import Policy, pra_percent
-from .runs import Progress, _quiet, read_inputs, solve_with_progress
+from .runs import Progress, _quiet, read_inputs, sensitisation, solve_with_progress
 from .solver import OBJECTIVES, Objective, Plan, expected_transplants
 
-POOL_PRA = "MATCH (p:Patient) RETURN p.id AS id, p.pool_pra AS pool_pra ORDER BY id"
+POOL_PRA = "MATCH (p:Patient) RETURN p.id AS id, p.pool_pra AS pool_pra, p.cpra AS cpra ORDER BY id"
 
 
 @dataclass(frozen=True)
@@ -80,7 +80,7 @@ def simulate(
 
     starts = policy.success.crossmatch_failure.starts
     band_of = {
-        row["id"]: max(i for i, s in enumerate(starts) if pra_percent(row["pool_pra"]) >= s)
+        row["id"]: max(i for i, s in enumerate(starts) if pra_percent(sensitisation(row, policy)) >= s)
         for row in conn.execute(POOL_PRA)
     }
     arms = []

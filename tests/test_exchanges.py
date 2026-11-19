@@ -43,3 +43,19 @@ def test_blocked_arc_breaks_the_cycle(graph_of):
 def test_arcs_mark_altruistic_donors(graph_of):
     conn = graph_of([patient("P1")], [donor("N1")])
     assert find_arcs(conn) == [Arc("N1", "P1", True)]
+
+
+def test_cycles_match_an_independent_search_across_several_patient_batches(graph_of):
+    """More pairs than one cycle-query batch, so a batch that skipped or repeated patients would show."""
+    from kidneyloop.exchanges import FIRST_PATIENT_BATCH
+    from kidneyloop.generator import generate_pool
+    from kidneyloop.solver import MatchInputs
+    from reference import all_exchanges
+
+    pool = generate_pool(seed=7, pairs=3 * FIRST_PATIENT_BATCH + 5, altruists=0)
+    conn = graph_of(pool.patients, pool.donors)
+    found = find_cycles(conn, max_length=3)
+    inputs = MatchInputs((), tuple(find_arcs(conn)), {d.paired_with: d.id for d in pool.donors}, {}, {})
+    expected = [e for e in all_exchanges(inputs, max_cycle=3, max_chain=0) if e.kind == "cycle"]
+    assert len(found) == len(set(found)) > 100
+    assert set(found) == set(expected)

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import relate
 
+from .cpra import HaplotypeTable, cpra
 from .datasets import ImportedPool
 from .model import ABO_CAN_GIVE_TO, ANTIGENS, BLOOD_TYPES, Pool
 
@@ -169,3 +170,33 @@ def load_imported(conn: relate.Connection, imported: ImportedPool) -> None:
     conn.execute(SET_DATASET, {"name": imported.source})
     conn.execute(SET_SOURCE_PRA, {"rows": [{"id": k, "pra": v} for k, v in imported.source_pra.items()]})
     conn.execute(DERIVE_POOL_PRA_FROM_ARCS)
+
+
+PATIENT_ANTIBODIES = """
+MATCH (p:Patient)
+OPTIONAL MATCH (p)-[:HAS_ANTIBODY]->(a:Antigen)
+RETURN p.id AS id, collect(a.name) AS antibodies
+"""
+SET_CPRA = """
+UNWIND $rows AS row
+MATCH (p:Patient {id: row.id})
+SET p.cpra = row.cpra
+"""
+REPLACE_CPRA_REFERENCE = """
+OPTIONAL MATCH (old:CpraReference) DETACH DELETE old
+WITH count(*) AS cleared
+CREATE (:CpraReference {population: $population, frequencies: $frequencies, serology: $serology, unmapped: $unmapped})
+"""
+
+
+def set_cpra(conn: relate.Connection, table: HaplotypeTable, frequencies: str, serology: str) -> dict[str, float]:
+    """Store each patient's CPRA against the table, replacing any earlier CPRA."""
+    if conn.execute("MATCH (ds:Dataset) RETURN count(ds) AS n").single()["n"]:
+        raise ValueError("this store holds an imported pool without HLA typing, so CPRA cannot be computed")
+    values = {r["id"]: cpra(frozenset(r["antibodies"]), table) for r in conn.execute(PATIENT_ANTIBODIES)}
+    conn.execute(SET_CPRA, {"rows": [{"id": k, "cpra": v} for k, v in values.items()]})
+    conn.execute(
+        REPLACE_CPRA_REFERENCE,
+        {"population": table.population, "frequencies": frequencies, "serology": serology, "unmapped": table.unmapped},
+    )
+    return values

@@ -7,14 +7,16 @@ import typer
 
 from .counterfactual import counterfactual as find_counterfactual, render as render_counterfactual
 from .exchanges import find_arcs, find_cycles
+from .cpra import DEFAULT_POPULATION, NMDP_RECORD, SEROLOGY_RELEASE, CpraDataError, load_reference
 from .datasets import DatasetError, read_preflib
 from .explain import explain, render
+from .lifecycle import STATUSES, TransitionError, set_status, statuses
 from .generator import generate_pool
 from .policy import DEFAULT_POLICY_FILE, Policy, PolicyError, load_policy
 from .runs import check_inputs, latest_run_id, run_match, run_record
 from .simulate import render as render_simulation, simulate as simulate_plans
 from .solver import OBJECTIVES, Objective
-from .store import create_json_store, derive, load_imported, load_pool
+from .store import create_json_store, derive, load_imported, load_pool, set_cpra
 from .whatif import withdraw_donor
 
 DEFAULT_STORE = Path("data/kidneyloop")
@@ -119,6 +121,31 @@ def import_preflib(
 
 
 @app.command()
+def cpra(
+    population: str = typer.Option(DEFAULT_POPULATION, help="NMDP population code; SCSEAI is South East Asian"),
+    cache: Path = typer.Option(Path("data/cache"), help="Where the downloaded reference files are kept"),
+    store: Path = DEFAULT_STORE,
+) -> None:
+    """Compute each patient's CPRA against NMDP haplotype frequencies and store it as p.cpra."""
+    try:
+        table = load_reference(cache, population)
+    except (CpraDataError, OSError) as e:
+        raise fail(f"Cannot load the CPRA reference: {e}", 2)
+    with open_store(store, read_only=False) as conn:
+        try:
+            values = set_cpra(conn, table, NMDP_RECORD, SEROLOGY_RELEASE)
+        except ValueError as e:
+            raise fail(str(e), 2)
+        rows = conn.execute("MATCH (p:Patient) RETURN p.id AS id, p.pool_pra AS pool_pra ORDER BY p.pool_pra DESC, id LIMIT 5")
+        top = [(r["id"], r["pool_pra"]) for r in rows]
+    typer.echo(f"CPRA for {len(values)} patients against {NMDP_RECORD}, population {population} ({SEROLOGY_RELEASE}).")
+    typer.echo(f"Haplotypes with an allele that has no single antigen: {table.unmapped:.2%} of the frequency, counted as safe.")
+    for patient, pool_pra in top:
+        typer.echo(f"  {patient}: pool PRA {pool_pra:.0%}, CPRA {values[patient]:.0%}")
+    typer.echo("Matching still reads pool PRA unless the policy sets \"sensitisation\": \"cpra\".")
+
+
+@app.command()
 def options(store: Path = DEFAULT_STORE, max_cycle: int = 3) -> None:
     """Count the cycles and arcs a matching round can choose from."""
     check_cycle_limit(max_cycle)
@@ -158,7 +185,10 @@ def match(
     goal = check_objective(objective)
     rules = read_policy(policy)
     with open_store(store, read_only=False) as conn:
-        run = run_match(conn, max_cycle, max_chain, progress, rules, goal)
+        try:
+            run = run_match(conn, max_cycle, max_chain, progress, rules, goal)
+        except LookupError as e:
+            raise fail(str(e), 2)
         patients = conn.execute("MATCH (p:Patient) RETURN count(p) AS n").single()["n"]
     cycles = [e for e in run.plan.exchanges if e.kind == "cycle"]
     chains = [e for e in run.plan.exchanges if e.kind == "chain"]
@@ -183,7 +213,10 @@ def simulate(
         raise fail("--trials must be at least 2 and --max-chain at least 0.", 2)
     rules = read_policy(policy)
     with open_store(store, read_only=True) as conn:
-        result = simulate_plans(conn, rules, trials, seed, max_cycle, max_chain, progress)
+        try:
+            result = simulate_plans(conn, rules, trials, seed, max_cycle, max_chain, progress)
+        except LookupError as e:
+            raise fail(str(e), 2)
     for line in render_simulation(result):
         typer.echo(line)
 
@@ -270,3 +303,37 @@ def audit(run: str = typer.Argument(None, help="Run id; the latest run if omitte
 
 if __name__ == "__main__":
     app()
+
+
+@app.command()
+def status(
+    exchange: str = typer.Argument(None, help="Exchange id, such as R1-X5; omit to list"),
+    set_to: str = typer.Option(None, "--set", help=f"New status: {', '.join(STATUSES)}"),
+    note: str = typer.Option("", help="Why, recorded with the change"),
+    store: Path = DEFAULT_STORE,
+) -> None:
+    """List exchanges with their status, or record what happened to one (offer, crossmatch, surgery)."""
+    if set_to is None:
+        if exchange is not None:
+            raise fail("Give --set with an exchange id, or no arguments to list.", 2)
+        with open_store(store, read_only=True) as conn:
+            run = latest_run_id(conn)
+            if run is None:
+                raise fail("No matching run recorded yet; run `kx match` first.", 2)
+            rows = statuses(conn, run)
+        counts: dict[str, int] = {}
+        for r in rows:
+            counts[r["status"]] = counts.get(r["status"], 0) + 1
+            typer.echo(f"{r['id']:<10} {r['kind']:<6} {r['size']}  {r['status']}")
+        typer.echo(", ".join(f"{n} {s}" for s, n in sorted(counts.items())))
+        return
+    if exchange is None:
+        raise fail("Give the exchange id to change.", 2)
+    with open_store(store, read_only=False) as conn:
+        try:
+            change = set_status(conn, exchange.strip().upper(), set_to, note)
+        except KeyError as e:
+            raise fail(str(e.args[0]), 1)
+        except TransitionError as e:
+            raise fail(str(e), 2)
+    typer.echo(change.summary())

@@ -29,8 +29,8 @@ MUTATIONS = [
     (
         "cycles reported once per rotation",
         "src/kidneyloop/exchanges.py",
-        'WHERE p1.id < p2.id"]',
-        '"]',
+        ' WHERE p1.id < p2.id"\n    ]',
+        '"\n    ]',
         ["tests/test_exchanges.py", "tests/test_solver.py"],
     ),
     (
@@ -106,9 +106,51 @@ MUTATIONS = [
     (
         "counterfactual ignores the run's cycle limit",
         "src/kidneyloop/counterfactual.py",
-        "            inputs = read_inputs(conn, max_cycle, progress, policy)\n",
-        "            inputs = read_inputs(conn, 3, progress, policy)\n",
+        "            inputs = read_inputs(conn, max_cycle, progress, policy, run[\"seq\"])\n",
+        "            inputs = read_inputs(conn, 3, progress, policy, run[\"seq\"])\n",
         ["tests/test_counterfactual.py"],
+    ),
+    (
+        "cycle batches skip patients",
+        "src/kidneyloop/exchanges.py",
+        "range(0, len(patients), FIRST_PATIENT_BATCH)",
+        "range(0, len(patients), 2 * FIRST_PATIENT_BATCH)",
+        ["tests/test_exchanges.py"],
+    ),
+    (
+        "imported arcs skip the blood-type check",
+        "src/kidneyloop/datasets.py",
+        "        if patient.blood_type not in ABO_CAN_GIVE_TO[donor.blood_type]:\n",
+        "        if False:\n",
+        ["tests/test_datasets.py"],
+    ),
+    (
+        "CPRA forgets that a donor has two haplotypes",
+        "src/kidneyloop/cpra.py",
+        "    return max(0.0, 1.0 - clear * clear)\n",
+        "    return max(0.0, 1.0 - clear)\n",
+        ["tests/test_cpra.py"],
+    ),
+    (
+        "held exchanges are planned again",
+        "src/kidneyloop/runs.py",
+        "        inputs = without(inputs, taken_patients, taken_donors)\n",
+        "        pass\n",
+        ["tests/test_lifecycle.py"],
+    ),
+    (
+        "a run's own statuses make it look stale",
+        "src/kidneyloop/runs.py",
+        " AND ($before IS NULL OR r.seq < $before)",
+        "",
+        ["tests/test_lifecycle.py"],
+    ),
+    (
+        "illegal status moves are accepted",
+        "src/kidneyloop/lifecycle.py",
+        "    if status not in TRANSITIONS[previous]:\n",
+        "    if False:\n",
+        ["tests/test_lifecycle.py"],
     ),
 ]
 

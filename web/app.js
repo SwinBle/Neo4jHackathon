@@ -190,6 +190,9 @@ function revealInspector() {
   if (matchMedia('(max-width: 980px)').matches) $('#why-h').scrollIntoView({ block: 'start' });
 }
 
+// Statuses from `kx status`: under way, done, or released back to the pool.
+const STATUS_TONE = { accepted: 'way', crossmatch_passed: 'way', scheduled: 'way', transplanted: 'done', declined: 'off', crossmatch_failed: 'off', cancelled: 'off' };
+
 function drawExchanges() {
   const broken = state.withdrawn ? new Set(state.withdrawn.broken) : new Set();
   const shown = state.exchanges.filter((e) => state.filter === 'all' || e.kind === state.filter);
@@ -204,7 +207,8 @@ function drawExchanges() {
           'aria-label': `Show ${e.id}, ${e.kind} of ${e.patients.length}`,
           'aria-pressed': String(state.selected === e.id),
         },
-        el('span', { class: 'ex-id' }, el('b', {}, e.id), `${e.kind === 'cycle' ? 'loop' : 'chain'} of ${e.patients.length}`),
+        el('span', { class: 'ex-id' }, el('b', {}, e.id), `${e.kind === 'cycle' ? 'loop' : 'chain'} of ${e.patients.length}`,
+          e.status !== 'proposed' ? el('span', { class: `status ${STATUS_TONE[e.status]}` }, e.status.replace('_', ' ')) : null),
         exchangeSvg(e),
       ),
     ),
@@ -297,6 +301,10 @@ async function explain(id) {
 // figures add the graph picture the CLI cannot show; they never change the text.
 async function whyLines(id, profile) {
   const lines = [`${id}: blood type ${profile.blood}; ${blocker()} ${Math.round(profile.pool_pra * 100)}% of this pool's donors (pool PRA)`];
+  if (profile.cpra !== null && profile.cpra !== undefined) {
+    const [ref] = await rows(Q.CPRA_REFERENCE);
+    lines[0] += `; CPRA ${Math.round(profile.cpra * 100)}% against NMDP ${ref?.population} haplotype frequencies`;
+  }
   const figures = [];
   const done = () => ({ lines, figures });
   const ex = state.exchanges.find((e) => e.patients.includes(id));

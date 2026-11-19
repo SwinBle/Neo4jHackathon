@@ -152,6 +152,10 @@ button.link { font: 13.5px var(--mono); color: var(--served); background: none; 
 .exchange.broken { background: var(--blocked-soft); border-color: var(--blocked); }
 .ex-id { font: 12px var(--mono); color: var(--muted); }
 .ex-id b { color: var(--ink); font-weight: 500; margin-right: 8px; }
+.status { float: right; font: 500 11px var(--mono); border-radius: 999px; padding: 1px 8px; border: 1px solid currentColor; }
+.status.way { color: var(--served); }
+.status.done { color: var(--live); }
+.status.off { color: var(--blocked); }
 @keyframes flow { to { stroke-dashoffset: -18; } }
 
 /* Graph drawings */

@@ -9,7 +9,7 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Literal, Mapping
 
 from .model import BLOOD_TYPES, BloodType
 
@@ -18,15 +18,23 @@ from .model import BLOOD_TYPES, BloodType
 DEFAULT_POLICY_FILE = Path(__file__).resolve().parents[2] / "policies" / "default.json"
 
 
+Sensitisation = Literal["pool_pra", "cpra"]
+SENSITISATIONS: tuple[Sensitisation, ...] = ("pool_pra", "cpra")
+
+
 class PolicyError(ValueError):
     pass
 
 
 @dataclass(frozen=True)
 class PatientFacts:
-    """What the graph knows about a patient that a policy may score."""
+    """What the graph knows about a patient that a policy may score.
 
-    pool_pra: float
+    pra is the sensitisation the policy reads: pool PRA, or CPRA when the policy's
+    sensitisation is "cpra".
+    """
+
+    pra: float
     wait_days: int
     blood: BloodType
     paired_donor_blood: BloodType | None
@@ -60,7 +68,7 @@ class PoolPraLinear:
     per_unit: float
 
     def points(self, p: PatientFacts, pool: PoolFacts) -> float:
-        return self.per_unit * p.pool_pra
+        return self.per_unit * p.pra
 
     def bound(self, pool: PoolFacts) -> float:
         return self.per_unit * 1.0
@@ -95,7 +103,7 @@ class PoolPraBands:
     bands: Bands
 
     def points(self, p: PatientFacts, pool: PoolFacts) -> float:
-        return self.bands.at(p.pool_pra)
+        return self.bands.at(p.pra)
 
     def bound(self, pool: PoolFacts) -> float:
         return max(self.bands.values)
@@ -146,6 +154,7 @@ class Policy:
     sha256: str
     tie_break: tuple[Term, ...]
     success: SuccessModel
+    sensitisation: Sensitisation = "pool_pra"
 
     def tie(self, p: PatientFacts, pool: PoolFacts) -> float:
         """The patient's tie-break score scaled to [0, 1] by the policy's largest possible score in this pool."""
@@ -226,7 +235,10 @@ def parse_policy(data: Any, sha256: str) -> Policy:
     )
     if any(v + model.exogenous_failure > 1.0 for v in model.crossmatch_failure.values):
         raise PolicyError("success: crossmatch_failure plus exogenous_failure must stay at most 1")
-    return Policy(name, sha256, tuple(terms), model)
+    sensitisation = data.get("sensitisation", "pool_pra")
+    if sensitisation not in SENSITISATIONS:
+        raise PolicyError(f"policy.sensitisation must be one of {', '.join(SENSITISATIONS)}, got {sensitisation!r}")
+    return Policy(name, sha256, tuple(terms), model, sensitisation)
 
 
 def load_policy(path: Path = DEFAULT_POLICY_FILE) -> Policy:

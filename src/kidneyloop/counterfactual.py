@@ -87,7 +87,7 @@ def counterfactual(
                 # so the patient's possible exchanges are the same as in the run.
                 trials.append(Trial(change, "opens no donor, not re-solved", None))
                 continue
-            inputs = read_inputs(conn, max_cycle, progress, policy)
+            inputs = read_inputs(conn, max_cycle, progress, policy, run["seq"])
             plan = solve_with_progress(inputs, max_chain, progress, objective)
             trials.append(Trial(change, f"opens {opened} donor{'s' if opened > 1 else ''}", plan))
         finally:
@@ -95,7 +95,7 @@ def counterfactual(
             conn.autocommit = previous
 
     progress("Reading the pool with the run's limits for the limit changes...")
-    inputs = read_inputs(conn, max_cycle, progress, policy)
+    inputs = read_inputs(conn, max_cycle, progress, policy, run["seq"])
     longer = max_chain + 1
     trials.append(Trial(f"chains of up to {longer} instead of {max_chain}", "", solve_with_progress(inputs, longer, progress, objective)))
     # Make serving the patient worth more than any number of other transplants, so the
@@ -104,7 +104,7 @@ def counterfactual(
     progress(f"Solving with {patient_id} required...")
     trials.append(Trial(f"{patient_id} required in the plan", "", solve_with_progress(forced, max_chain, progress, objective)))
     if max_cycle == 2:
-        wider = read_inputs(conn, 3, progress, policy)
+        wider = read_inputs(conn, 3, progress, policy, run["seq"])
         trials.append(Trial("3-way cycles allowed", "", solve_with_progress(wider, max_chain, progress, objective)))
     return Counterfactual(patient_id, why.run, max_cycle, max_chain, policy.name, objective, before, tuple(trials))
 
