@@ -37,7 +37,7 @@ const el = (tag, attrs = {}, ...children) => {
   return node;
 };
 
-const state = { snapshot: null, run: null, exchanges: [], holder: new Map(), giver: new Map(), withdrawn: null, filter: 'all', selected: null };
+const state = { dataset: null, snapshot: null, run: null, exchanges: [], holder: new Map(), giver: new Map(), withdrawn: null, filter: 'all', selected: null };
 
 async function load() {
   $('#status').textContent = 'Loading graph.json into Relate (WebAssembly)…';
@@ -58,6 +58,10 @@ async function showRun() {
     return;
   }
   state.run = summary.run;
+  state.dataset = (await rows(Q.DATASET))[0]?.name ?? null;
+  if (state.dataset) {
+    $('#notice').replaceChildren(el('b', {}, 'Benchmark data.'), ` Pairs and compatibility come from ${state.dataset}, a published synthetic pool. It has no HLA typing, so blocked donors are the arcs the dataset leaves out.`);
+  }
   const seq = (id) => Number(id.split('-X')[1]);
   state.exchanges = (await rows(Q.RUN_EXCHANGES, { run: summary.run }))
     .sort((a, b) => b.patients.length - a.patients.length || seq(a.id) - seq(b.id));
@@ -106,6 +110,8 @@ function drawHero(loops) {
   );
   animateHero(svg, loop);
 }
+
+const blocker = () => (state.dataset ? `the ${state.dataset} arcs rule out` : 'antibodies rule out');
 
 function countUp(target) {
   const span = el('span', { class: 'count' }, String(target));
@@ -176,7 +182,7 @@ async function fillPatientPickers() {
   $('#patient-ids').replaceChildren(...patients.map((p) => el('option', { value: p.id })));
   const hardest = patients.filter((p) => !state.holder.has(p.id)).slice(0, 8);
   $('#hard-picks').replaceChildren(
-    ...hardest.map((p) => el('button', { type: 'button', class: 'chip', onclick: () => explain(p.id), 'aria-label': `Explain ${p.id}, antibodies rule out ${Math.round(p.pool_pra * 100)} percent of donors` }, p.id, el('span', { class: 'pct' }, `${Math.round(p.pool_pra * 100)}%`))),
+    ...hardest.map((p) => el('button', { type: 'button', class: 'chip', onclick: () => explain(p.id), 'aria-label': `Explain ${p.id}, ${blocker()} ${Math.round(p.pool_pra * 100)} percent of donors` }, p.id, el('span', { class: 'pct' }, `${Math.round(p.pool_pra * 100)}%`))),
   );
 }
 
@@ -290,7 +296,7 @@ async function explain(id) {
 // Mirrors render() in src/kidneyloop/explain.py line for line, so `kx why` and the page agree.
 // figures add the graph picture the CLI cannot show; they never change the text.
 async function whyLines(id, profile) {
-  const lines = [`${id}: blood type ${profile.blood}; antibodies rule out ${Math.round(profile.pool_pra * 100)}% of this pool's donors (pool PRA)`];
+  const lines = [`${id}: blood type ${profile.blood}; ${blocker()} ${Math.round(profile.pool_pra * 100)}% of this pool's donors (pool PRA)`];
   const figures = [];
   const done = () => ({ lines, figures });
   const ex = state.exchanges.find((e) => e.patients.includes(id));
@@ -307,7 +313,7 @@ async function whyLines(id, profile) {
   if (antigens.length) lines.push(`Antibody hits among them: ${antigens.slice(0, 5).map((a) => `${a.antigen} (${a.donors} donors)`).join(', ')}.`);
   lines.push(`${incoming.n} donors can give to ${id} (${incoming.altruistic ?? 0} altruistic).`);
   if (incoming.n === 0) {
-    lines.push(`Reason: ${abo.n === 0 ? 'no donor has a compatible blood type' : 'every blood-compatible donor carries an antigen the patient has antibodies to'}.`);
+    lines.push(`Reason: ${abo.n === 0 ? 'no donor has a compatible blood type' : state.dataset ? `${state.dataset} lists no arc from any blood-compatible donor` : 'every blood-compatible donor carries an antigen the patient has antibodies to'}.`);
     return done();
   }
   if (profile.own_donor && profile.own_donor_can_give === 0) {

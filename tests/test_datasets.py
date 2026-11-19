@@ -120,3 +120,21 @@ def test_cli_reports_a_missing_file(tmp_path):
     result = CliRunner().invoke(app, ["import-preflib", str(tmp_path / "nope.dat"), "--store", str(tmp_path / "s")])
     assert result.exit_code == 2
     assert "Cannot read" in result.output
+
+
+def test_why_names_the_dataset_instead_of_antibodies(imported_graph):
+    from kidneyloop.explain import explain, render
+
+    lines = render(explain(imported_graph, "P4"))
+    assert lines[0] == "P4: blood type AB; the PrefLib 00036-test arcs rule out 25% of this pool's donors (pool PRA)"
+    assert not any("ntibod" in line for line in lines)
+
+
+def test_why_reason_blames_missing_arcs_not_antigens(tmp_path):
+    from kidneyloop.explain import explain, render
+
+    conn = relate.connect(":memory:")
+    load_imported(conn, read_preflib(*write_instance(tmp_path, arcs=[(1, 2), (2, 1), (3, 1)], pairs=[(1, "A", "B", "0", "0.05", 1, 0), (2, "B", "A", "0", "0.45", 1, 0), *PAIRS[2:]])))
+    lines = render(explain(conn, "P4"))
+    conn.close()
+    assert lines[-1] == "Reason: PrefLib 00036-test lists no arc from any blood-compatible donor."

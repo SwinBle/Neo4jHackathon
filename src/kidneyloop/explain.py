@@ -26,6 +26,7 @@ ORDER BY donors DESC, antigen
 """
 ALTRUISTS_FOR = "MATCH (n:Donor {altruistic: true})-[:COMPATIBLE]->(:Patient {id: $id}) RETURN n.id AS id ORDER BY id"
 INCOMING ="MATCH (d:Donor)-[:COMPATIBLE]->(:Patient {id: $id}) RETURN count(d) AS n, sum(CASE WHEN d.altruistic THEN 1 ELSE 0 END) AS altruistic"
+DATASET = "MATCH (ds:Dataset) RETURN ds.name AS name"
 CYCLES_THROUGH = """
 MATCH (p:Patient {id: $id})<-[:PAIRED_WITH]-(:Donor)-[:COMPATIBLE]->(p2:Patient)<-[:PAIRED_WITH]-(:Donor)-[:COMPATIBLE]->(p)
 RETURN [p.id, p2.id] AS patients
@@ -52,6 +53,7 @@ class Why:
     candidate_cycles: tuple[tuple[str, ...], ...]
     taken_by: dict[str, str]
     altruists_used: dict[str, str | None]
+    dataset: str | None = None
 
 
 def explain(conn: relate.Connection, patient_id: str) -> Why:
@@ -82,11 +84,15 @@ def explain(conn: relate.Connection, patient_id: str) -> Why:
         candidate_cycles=cycles,
         taken_by={p: holder[p] for c in cycles for p in c[1:] if p in holder},
         altruists_used={r["id"]: giver.get(r["id"]) for r in conn.execute(ALTRUISTS_FOR, params)},
+        dataset=next((r["name"] for r in conn.execute(DATASET)), None),
     )
 
 
 def render(why: Why) -> list[str]:
-    lines = [f"{why.patient}: blood type {why.blood}; antibodies rule out {why.pool_pra:.0%} of this pool's donors (pool PRA)"]
+    # An imported pool has the dataset's arcs but no HLA typing, so nothing can be
+    # said about antibodies; the blocked share comes from the missing arcs instead.
+    blocker = f"the {why.dataset} arcs rule out" if why.dataset else "antibodies rule out"
+    lines = [f"{why.patient}: blood type {why.blood}; {blocker} {why.pool_pra:.0%} of this pool's donors (pool PRA)"]
     if why.matched_in:
         ex_id, e = why.matched_in
         steps = ", ".join(f"{d} -> {p}" for d, p in zip(e.donors, e.patients))
@@ -99,7 +105,13 @@ def render(why: Why) -> list[str]:
         lines.append(f"Antibody hits among them: {top}.")
     lines.append(f"{why.incoming} donors can give to {why.patient} ({why.incoming_altruistic} altruistic).")
     if why.incoming == 0:
-        reason = "no donor has a compatible blood type" if why.abo_donors == 0 else "every blood-compatible donor carries an antigen the patient has antibodies to"
+        reason = (
+            "no donor has a compatible blood type"
+            if why.abo_donors == 0
+            else f"{why.dataset} lists no arc from any blood-compatible donor"
+            if why.dataset
+            else "every blood-compatible donor carries an antigen the patient has antibodies to"
+        )
         lines.append(f"Reason: {reason}.")
         return lines
     if why.own_donor and why.own_donor_can_give == 0:

@@ -71,6 +71,7 @@ UNWIND $arcs AS arc
 MATCH (d:Donor {id: arc.donor}), (p:Patient {id: arc.patient})
 CREATE (d)-[:COMPATIBLE]->(p)
 """
+SET_DATASET = "CREATE (:Dataset {name: $name})"
 SET_SOURCE_PRA = """
 UNWIND $rows AS row
 MATCH (p:Patient {id: row.id})
@@ -165,5 +166,6 @@ def load_imported(conn: relate.Connection, imported: ImportedPool) -> None:
     """Write a benchmark pool with the dataset's own compatibility arcs."""
     load_pool(conn, imported.pool)
     conn.execute(LOAD_ARCS, {"arcs": [{"donor": d, "patient": p} for d, p in imported.arcs]})
+    conn.execute(SET_DATASET, {"name": imported.source})
     conn.execute(SET_SOURCE_PRA, {"rows": [{"id": k, "pra": v} for k, v in imported.source_pra.items()]})
     conn.execute(DERIVE_POOL_PRA_FROM_ARCS)

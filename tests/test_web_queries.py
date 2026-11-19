@@ -15,6 +15,7 @@ SHARED = {
     "INCOMING": explain.INCOMING,
     "CYCLES_THROUGH": explain.CYCLES_THROUGH,
     "ALTRUISTS_FOR": explain.ALTRUISTS_FOR,
+    "DATASET": explain.DATASET,
     "DONOR_EXISTS": whatif.DONOR_EXISTS,
     "WITHDRAW": whatif.WITHDRAW,
 }

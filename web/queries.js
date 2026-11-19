@@ -50,6 +50,8 @@ export const PATIENT_INDEX = `MATCH (p:Patient) RETURN p.id AS id, p.pool_pra AS
 
 export const ALTRUISTS_FOR = `MATCH (n:Donor {altruistic: true})-[:COMPATIBLE]->(:Patient {id: $id}) RETURN n.id AS id ORDER BY id`;
 
+export const DATASET = `MATCH (ds:Dataset) RETURN ds.name AS name`;
+
 export const DONOR_EXISTS = `MATCH (d:Donor {id: $id}) RETURN count(d) AS n`;
 
 export const WITHDRAW = `
