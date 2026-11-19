@@ -22,7 +22,11 @@ function call(message) {
   });
 }
 
-const cypher = (statement, params) => call({ op: 'run', statement, params });
+// A missing query means the browser mixed a cached queries.js with a newer app.js.
+const cypher = (statement, params) => {
+  if (typeof statement !== 'string') throw new Error('this page mixes old and new files from the browser cache. Reload with Ctrl+Shift+R (Cmd+Shift+R on a Mac).');
+  return call({ op: 'run', statement, params });
+};
 const rows = async (statement, params) => (await cypher(statement, params)).rows;
 
 const $ = (sel) => document.querySelector(sel);
