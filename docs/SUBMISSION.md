@@ -16,7 +16,7 @@ https://github.com/SwinBle/Neo4jHackathon (public, topics `relate` and `relate-n
 
 ## Demo video
 
-https://youtu.be/cnwWKqEXoWQ (unlisted, 1:42). TODO: replace with the new recording once it is uploaded; the old video stays up.
+https://youtu.be/MdQcFg6f5VE (unlisted, 1:51)
 
 ## About the project
 
