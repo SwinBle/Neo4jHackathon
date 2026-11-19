@@ -169,8 +169,10 @@ kx match --store data/preflib-111
 ### Web explorer
 
 ```bash
-python -m http.server 8000
+python scripts/serve_web.py 8000
 ```
+
+The script is `python -m http.server` with `Cache-Control: no-cache`, so a browser never mixes cached files from an older version with new ones.
 
 Add `?snapshot=<path>` to open another store's `graph.json`, for example `web/?snapshot=../data/preflib-111/graph.json`.
 
