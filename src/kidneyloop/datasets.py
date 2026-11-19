@@ -31,7 +31,7 @@ def read_preflib(dat: Path, wmd: Path) -> ImportedPool:
 
     In the .wmd file vertex i is pair i, and an arc i,j means pair i's donor can give
     to pair j's patient. Files with altruistic donors are rejected: PrefLib marks them
-    as faulty, and the ones checked here have arcs that break the blood-type rules.
+    as faulty, and the one checked (instance 50) has arcs that break the blood-type rules.
     """
     with dat.open(newline="") as f:
         reader = csv.DictReader(f)
@@ -111,7 +111,7 @@ def _read_wmd(path: Path) -> tuple[dict[str, str], list[tuple[int, tuple[int, in
                 raise DatasetError(f"{path.name}:{line}: expected 'from,to,weight', got {text!r}")
             # The solver gives every transplant the same base value, so a weight
             # other than 1 would be silently ignored; refuse it instead.
-            if parts[2] != "1.0":
+            if _number(parts[2], path, line) != 1.0:
                 raise DatasetError(f"{path.name}:{line}: arc weight {parts[2]} is not 1.0, and KidneyLoop does not use arc weights")
             arcs.append((line, (_int(parts[0], path, line), _int(parts[1], path, line))))
     return header, arcs
@@ -124,11 +124,15 @@ def _int(text: str, path: Path, line: int) -> int:
         raise DatasetError(f"{path.name}:{line}: {text!r} is not a whole number") from None
 
 
-def _fraction(text: str, path: Path, line: int) -> float:
+def _number(text: str, path: Path, line: int) -> float:
     try:
-        value = float(text)
+        return float(text)
     except ValueError:
         raise DatasetError(f"{path.name}:{line}: {text!r} is not a number") from None
+
+
+def _fraction(text: str, path: Path, line: int) -> float:
+    value = _number(text, path, line)
     if not 0.0 <= value <= 1.0:
         raise DatasetError(f"{path.name}:{line}: PRA {value} is outside 0 to 1")
     return value

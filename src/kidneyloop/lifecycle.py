@@ -32,7 +32,9 @@ FAILED: tuple[Status, ...] = ("declined", "crossmatch_failed", "cancelled")
 EXCHANGE = """
 MATCH (r:MatchRun)-[:SELECTED]->(e:Exchange {id: $id})
 OPTIONAL MATCH (e)-[:HAD_STATUS]->(s:StatusEvent)
-RETURN coalesce(e.status, 'proposed') AS status, count(s) AS events
+WITH r, e, count(s) AS events
+MATCH (m:MatchRun)
+RETURN coalesce(e.status, 'proposed') AS status, events, r.id AS run, r.seq AS seq, max(m.seq) AS last
 """
 # The patients' own donors count too: they leave or return with their patients,
 # as runs.HELD treats them.
@@ -96,6 +98,10 @@ def set_status(conn: relate.Connection, exchange: str, status: str, note: str = 
     if status not in TRANSITIONS[previous]:
         allowed = ", ".join(TRANSITIONS[previous]) or "nothing; it is final"
         raise TransitionError(f"{exchange} is {previous}; it can move to {allowed}, not {status}")
+    # A later run replanned the same pool, so this offer's people may be planned again
+    # there; only the latest run's offers can be accepted.
+    if previous == "proposed" and status == "accepted" and rows[0]["seq"] != rows[0]["last"]:
+        raise TransitionError(f"{exchange} is a proposal of {rows[0]['run']}, which a later run replaced; accept an exchange of the latest run")
     stamp = (at or datetime.now(timezone.utc)).isoformat(timespec="seconds")
     conn.execute(
         RECORD,

@@ -101,7 +101,7 @@ Patient and donor ids are case-insensitive. `kx match` and `kx whatif` print eac
 
 ### Auditing a run
 
-Every `kx match` stores an `input_sha256` on its `MatchRun`: a SHA-256 of what the solver read, namely each patient's id, `pool_pra`, `wait_days` and blood type, each donor's id, blood type, altruistic flag and paired patient, every `COMPATIBLE` arc, and the run's cycle limit, chain limit, policy hash and objective. Rows are sorted by id first, so the hash does not depend on the order Relate returns them or on Python's hash seed; tests check both. The run also stores `objective_kind` (`count` or `expected`) next to the readable `objective` text.
+Every `kx match` stores an `input_sha256` on its `MatchRun`: a SHA-256 of what the solver read, namely each patient's id, `pool_pra`, `wait_days`, blood type and, once `kx cpra` has run, `cpra`, each donor's id, blood type, altruistic flag and paired patient, every `COMPATIBLE` arc, the run's cycle limit, chain limit, policy hash and objective, and, when exchanges are under way, the patients and donors they hold. Rows are sorted by id first, so the hash does not depend on the order Relate returns them or on Python's hash seed; tests check both. The run also stores `objective_kind` (`count` or `expected`) next to the readable `objective` text.
 
 `kx audit [RUN]` (the latest run by default) recomputes the hash from the store as it is now and compares. `kx why`, `kx whatif` and `kx counterfactual` print a warning line first when the pool changed since the latest run, because their answer may then be stale. Output from a copy of the committed store after `kx match` recorded R2, and again after P071's `wait_days` was raised by 30:
 
@@ -164,7 +164,7 @@ kx import-preflib 00036-00000111.dat --store data/preflib-111
 kx match --store data/preflib-111
 ```
 
-On instance 111 (128 pairs, 4,108 arcs) Cypher finds 8,953 cycles, the same count as an independent search, and `kx match` picks 83 transplants. The importer checks every arc against the blood-type rules, the declared edge count and each pair's out-degree, and it refuses what it cannot import faithfully: files with altruistic donors (PrefLib marks them as faulty, and the ones checked here break the blood-type rules) and arc weights other than 1. Instance 200 (512 pairs, 63,154 arcs) has 535,344 cycles of up to 3, again the same count as an independent search. Cypher enumerates them in about 3 minutes, and HiGHS then picks 312 transplants in about 4.5 minutes (both measured while the test suite ran on the same machine). Cycles are fetched 32 first patients at a time; in one query this pool's result passed the engine's 256 MB value limit.
+The figures in this paragraph come from one manual run on 2026-11-19. The PrefLib files are not committed, and the tests use a small synthetic instance in the same format, so nothing in CI reproduces them; the commands above do. On instance 111 (128 pairs, 4,108 arcs) Cypher finds 8,953 cycles, the same count as a separate brute-force search written for the check (not in the repo), and `kx match` picks 83 transplants. The importer checks every arc against the blood-type rules, the declared edge count and each pair's out-degree, and it refuses what it cannot import faithfully: files with altruistic donors (PrefLib marks them as faulty, and the one checked here, instance 50, has arcs that break the blood-type rules) and arc weights other than 1. Instance 200 (512 pairs, 63,154 arcs) has 535,344 cycles of up to 3, again the same count as an independent search. Cypher enumerates them in about 3 minutes, and HiGHS then picks 312 transplants in about 4.5 minutes (both measured while the test suite ran on the same machine). Cycles are fetched 32 first patients at a time; in one query this pool's result passed the engine's 256 MB value limit.
 
 ### Web explorer
 
@@ -276,30 +276,30 @@ kx status R1-X5 --set crossmatch_failed            # prints who goes back into t
 | scheduled | transplanted, cancelled |
 | transplanted, declined, crossmatch_failed, cancelled | nothing; they are final |
 
-Each change sets `e.status` and appends a `StatusEvent {seq, previous, status, at, note}` through `HAD_STATUS`, so the history stays in the graph. Repeating the current status records nothing, and an illegal move names the moves allowed. Exchanges that are accepted, crossmatch_passed, scheduled or transplanted keep their patients and donors out of the next round, including each patient's own donor; declined, failed and cancelled ones release them. The next run's input hash records who was held, while a run's own audit ignores statuses set on its own exchanges, so accepting R1-X5 does not make R1 look stale. A chain's last donor leaves with their patient rather than starting a new chain, which real programs often do.
+Each change sets `e.status` and appends a `StatusEvent {seq, previous, status, at, note}` through `HAD_STATUS`, so the history stays in the graph. Repeating the current status records nothing, and an illegal move names the moves allowed. Only the latest run's proposals can be accepted: a later run plans the same pool again, so an earlier offer's people may already be in its plan, and accepting both would promise them twice. An earlier run's exchange that was already accepted keeps moving through its steps. Exchanges that are accepted, crossmatch_passed, scheduled or transplanted keep their patients and donors out of the next round, including each patient's own donor; declined, failed and cancelled ones release them. The next run's input hash records who was held, while a run's own audit ignores statuses set on its own exchanges, so accepting R1-X5 does not make R1 look stale. A chain's last donor leaves with their patient rather than starting a new chain, which real programs often do.
 
 ## CPRA from a reference population
 
 Pool PRA counts the donors in this pool that a patient's antibodies rule out. Clinical programs use CPRA, the share of a reference donor population they rule out. `kx cpra` computes it from NMDP haplotype frequencies and stores it as `p.cpra`:
 
 ```bash
-kx cpra                      # population SCSEAI (South East Asian), downloads about 40 MB once into data/cache/
+kx cpra                      # population SCSEAI (Other Southeast Asian), downloads about 40 MB once into data/cache/
 kx cpra --population EURCAU  # any population code in the NMDP file
 kx match --policy policies/default-cpra.json
 ```
 
 - Formula. The OPTN policy notice defines CPRA as the sum over donor genotypes of genotype frequency times whether the genotype carries an unacceptable antigen. With haplotype frequencies and Hardy-Weinberg genotypes that sum equals 1 - (sum of frequencies of haplotypes carrying none of them)^2, which is what `kx cpra` computes; a test checks the two forms agree on random tables. Only HLA-A, B and DR count, because those are the loci KidneyLoop types. Blood type stays with the ABO rules.
-- Data. Frequencies come from the [NMDP 7-locus haplotype frequencies on Zenodo](https://zenodo.org/records/4474442) (CC BY-NC-ND 4.0), checked against the md5 Zenodo publishes. Alleles map to serologic antigens with [IPD-IMGT/HLA rel_dna_ser.txt](https://github.com/ANHIG/IMGTHLA) release 3.60.0 (CC BY-ND). Release 3.66.0 writes allele codes such as 4001 where earlier releases give the antigen (B60), so the release is pinned. Neither licence allows redistributing modified data, so both files are downloaded at run time and `data/cache/` is not committed.
-- Population. The default is SCSEAI, NMDP's South East Asian group, the closest NMDP group to a Thai donor population. OPTN weights its US populations by their share of deceased donors; KidneyLoop uses one population at a time.
-- Limits. An allele with no single serologic antigen counts as carrying none; in SCSEAI that is 0.05% of the haplotype frequency. Antibodies to associated antigens (B75, a split of B15, for example) only match donors whose allele maps to that same antigen.
+- Data. Frequencies come from the [NMDP 7-locus haplotype frequencies on Zenodo](https://zenodo.org/records/4474442) (CC BY-NC-ND 4.0), checked against the md5 Zenodo publishes. Alleles map to serologic antigens with [IPD-IMGT/HLA rel_dna_ser.txt](https://github.com/ANHIG/IMGTHLA) release 3.60.0 (CC BY-ND). Release 3.66.0 writes values such as 4001 in the serology column where 3.60.0 gives the antigen (B60), so the release is pinned. Neither licence allows redistributing modified data, so both files are downloaded at run time and `data/cache/` is not committed.
+- Population. The default is SCSEAI, NMDP's "Other Southeast Asian" group. NMDP has no Thai group, and this is the closest one by region, not one validated against Thai typing data. OPTN weights its US populations by their share of deceased donors; KidneyLoop uses one population at a time.
+- Limits. An allele with no single serologic antigen is left out of its haplotype, which keeps its other antigens, so CPRA can only be underestimated; in SCSEAI that is 0.05% of the haplotype frequency. Antibodies to associated antigens (B75, a split of B15, for example) only match donors whose allele maps to that same antigen.
 - Matching. `policies/default-cpra.json` is the default policy with `"sensitisation": "cpra"`, so the tie-break and the success model read CPRA. Without that line a policy reads pool PRA, and a store without CPRA keeps its recorded input hashes. `kx why` adds the patient's CPRA once it is set.
 
-On the committed pool the most sensitised patients score 94 to 98% CPRA against SCSEAI where their pool PRA is 99 to 100%.
+On the committed pool, in a manual run on 2026-11-19 (the NMDP file is downloaded, so the tests do not repeat it), the most sensitised patients score 94 to 98% CPRA against SCSEAI where their pool PRA is 99 to 100%.
 
 ## Testing and QA
 
 ```bash
-pytest -m "not qa_full"       # 497 tests, about 2 min
+pytest -m "not qa_full"       # 559 tests, about 1 min
 pytest -m qa_full             # the committed 300-pair store, about 2 min
 python scripts/mutation_check.py
 ```
@@ -309,7 +309,7 @@ python scripts/mutation_check.py
 - **Policies and simulation.** The default policy reproduces the original weights bit for bit, every shipped policy keeps the tie-break below one transplant, a malformed policy names the bad field, and simulated cycles and chains succeed and stop as the model says.
 - **Cypher against reference.** Cycles found by Cypher equal cycles found by an independent Python search on generated pools.
 - **End-to-end QA** (`tests/qa`). The real CLI runs on a fresh store. Tests cover reproducible builds, the relate CLI reading what Python wrote, a recorded run that obeys every rule with no unused cycle or altruist left, read-only commands and what-if leaving the store files unchanged, error exits, the MCP server, and the web page running the same Cypher as the CLI.
-- **Mutation check.** `scripts/mutation_check.py` plants fourteen known bugs one at a time, including a plan that changes with row order or Python's hash seed, an expected objective that ignores chain position, a simulated chain that continues past a failure, an input hash that ignores `COMPATIBLE` edges, and a counterfactual that commits instead of rolling back, and confirms the suite fails on each.
+- **Mutation check.** `scripts/mutation_check.py` plants 21 known bugs one at a time, including a superseded proposal being accepted, CPRA that counts one haplotype instead of two, imported arcs that skip the blood-type check, a plan that changes with row order or Python's hash seed, an expected objective that ignores chain position, a simulated chain that continues past a failure, an input hash that ignores `COMPATIBLE` edges, and a counterfactual that commits instead of rolling back, and confirms the suite fails on each.
 
 [docs/QA.md](docs/QA.md) lists the browser checks done by hand on the web explorer.
 

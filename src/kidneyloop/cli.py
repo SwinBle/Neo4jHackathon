@@ -301,9 +301,6 @@ def audit(run: str = typer.Argument(None, help="Run id; the latest run if omitte
         typer.echo("  inputs unchanged" if check.unchanged else "  inputs changed since this run")
 
 
-if __name__ == "__main__":
-    app()
-
 
 @app.command()
 def status(
@@ -337,3 +334,7 @@ def status(
         except TransitionError as e:
             raise fail(str(e), 2)
     typer.echo(change.summary())
+
+
+if __name__ == "__main__":
+    app()

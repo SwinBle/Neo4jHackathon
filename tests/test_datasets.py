@@ -100,6 +100,11 @@ def test_rejects_files_it_cannot_import_faithfully(tmp_path, change, message):
         read_preflib(*write_instance(tmp_path, **change))
 
 
+@pytest.mark.parametrize("weight", ["1", "1.00"])
+def test_any_spelling_of_weight_one_is_accepted(tmp_path, weight):
+    assert read_preflib(*write_instance(tmp_path, weights=[weight] * len(ARCS))).arcs
+
+
 def test_rejects_an_unexpected_header(tmp_path):
     dat, wmd = write_instance(tmp_path)
     dat.write_text("Pair,Patient,Donor\n1,A,B\n")

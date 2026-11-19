@@ -81,6 +81,13 @@ def test_rejects_frequencies_that_do_not_sum_to_one():
         read_haplotypes("Haplo,Count,Freq\nA*02:01~B*40:01~DRB1*03:01,1,0.5\n", "TEST", serology_map(REL_DNA_SER))
 
 
+def test_a_sum_slightly_off_one_is_scaled_so_no_antibodies_score_zero():
+    text = "Haplo,Count,Freq\nA*02:01~B*40:01~DRB1*03:01,1,0.4996\nA*02:01~DRB1*14:54,1,0.4998\n"
+    table = read_haplotypes(text, "TEST", serology_map(REL_DNA_SER))
+    assert sum(f for _, f in table.haplotypes) == pytest.approx(1.0, abs=1e-12)
+    assert cpra(frozenset(), table) == pytest.approx(0.0, abs=1e-12)
+
+
 def test_rejects_unexpected_columns():
     with pytest.raises(CpraDataError, match="expected columns"):
         read_haplotypes("Haplotype,Freq\n", "TEST", {})

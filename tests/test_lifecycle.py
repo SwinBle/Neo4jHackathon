@@ -158,3 +158,20 @@ def test_the_summary_names_the_same_people_the_next_round_leaves_out(two_swaps):
     patients, donors = held(two_swaps)
     assert set(change.patients) == patients
     assert set(change.donors) == donors
+
+
+def test_only_the_latest_runs_proposals_can_be_accepted(two_swaps):
+    older = exchange_of(two_swaps, "P1")
+    run_match(two_swaps)  # R2 plans P1-P2 again, since nothing is held yet
+    with pytest.raises(TransitionError, match="later run replaced"):
+        set_status(two_swaps, older, "accepted", at=AT)
+    assert two_swaps.execute("MATCH (:Exchange {id: $id})-[:HAD_STATUS]->(s) RETURN count(s) AS n", {"id": older}).single()["n"] == 0
+    assert set_status(two_swaps, older, "declined", at=AT).recorded
+
+
+def test_an_accepted_exchange_of_an_earlier_run_keeps_moving(two_swaps):
+    ex = exchange_of(two_swaps, "P1")
+    set_status(two_swaps, ex, "accepted", at=AT)
+    run_match(two_swaps)
+    assert "P1" not in planned_patients(two_swaps, "R2")
+    assert set_status(two_swaps, ex, "crossmatch_passed", at=AT).recorded

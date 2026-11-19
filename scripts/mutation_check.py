@@ -152,6 +152,13 @@ MUTATIONS = [
         "    if False:\n",
         ["tests/test_lifecycle.py"],
     ),
+    (
+        "a superseded proposal is accepted",
+        "src/kidneyloop/lifecycle.py",
+        " and rows[0][\"seq\"] != rows[0][\"last\"]:",
+        ":",
+        ["tests/test_lifecycle.py"],
+    ),
 ]
 
 

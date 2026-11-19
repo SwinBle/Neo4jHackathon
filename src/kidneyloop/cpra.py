@@ -25,9 +25,9 @@ from .model import ANTIGENS
 NMDP_URL = "https://zenodo.org/records/4474442/files/freqs_7loc_2020_trim.tar.gz?download=1"
 NMDP_MD5 = "2ff384cc2f57cde3da73566616f6aa4c"
 NMDP_RECORD = "NMDP 7-locus haplotype frequencies (2020, trimmed), Zenodo record 4474442"
-# Release 3.60.0. Later releases (3.66.0 checked) write allele-level codes such as
-# 4001 in the serology column where earlier ones give the antigen (B60), so the
-# column's meaning changed and the release is pinned.
+# Release 3.60.0. Release 3.66.0 writes values such as 4001 in the serology column
+# where 3.60.0 gives the antigen (B60), so the column's meaning changed and the
+# release is pinned.
 SEROLOGY_URL = "https://raw.githubusercontent.com/ANHIG/IMGTHLA/3600/wmda/rel_dna_ser.txt"
 SEROLOGY_RELEASE = "IPD-IMGT/HLA 3.60.0 rel_dna_ser.txt"
 DEFAULT_POPULATION = "SCSEAI"
@@ -45,8 +45,8 @@ class HaplotypeTable:
     """A-B-DR haplotypes as KidneyLoop antigen names with their population frequency.
 
     unmapped is the frequency of haplotypes with an allele that has no single
-    serologic antigen; those count as carrying no unacceptable antigen, so CPRA can
-    only be underestimated by them.
+    serologic antigen. That allele is left out and the haplotype keeps its other
+    antigens, so CPRA can only be underestimated by them.
     """
 
     population: str
@@ -103,11 +103,15 @@ def read_haplotypes(csv_text: str, population: str, serology: dict[str, str | No
                 antigens.add(antigen)
         if not clear:
             unmapped += freq
-        key = frozenset(antigens & set(ANTIGENS)) if clear else frozenset(a for a in antigens if a in ANTIGENS)
+        key = frozenset(antigens & set(ANTIGENS))
         merged[key] = merged.get(key, 0.0) + freq
     if not 0.999 <= total <= 1.001:
         raise CpraDataError(f"{population}: haplotype frequencies sum to {total}, not 1")
-    return HaplotypeTable(population, tuple(sorted(merged.items(), key=lambda kv: sorted(kv[0]))), unmapped)
+    # Rounding in the published file leaves the sum a little off 1; scale it back so
+    # a patient with no antibodies scores exactly 0.
+    return HaplotypeTable(
+        population, tuple(sorted(((k, f / total) for k, f in merged.items()), key=lambda kv: sorted(kv[0]))), unmapped / total
+    )
 
 
 def cpra(antibodies: frozenset[str], table: HaplotypeTable) -> float:
