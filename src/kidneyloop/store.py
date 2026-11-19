@@ -5,6 +5,7 @@ from pathlib import Path
 
 import relate
 
+from .datasets import ImportedPool
 from .model import ABO_CAN_GIVE_TO, ANTIGENS, BLOOD_TYPES, Pool
 
 SCHEMA = [
@@ -60,6 +61,30 @@ DERIVE_POOL_PRA = """
 MATCH (any:Donor) WITH count(any) AS total
 MATCH (p:Patient)
 OPTIONAL MATCH (p)-[:HAS_ANTIBODY]->(:Antigen)<-[:HAS_ANTIGEN]-(d:Donor)
+WITH p, total, count(DISTINCT d) AS blocked
+SET p.pool_pra = toFloat(blocked) / total
+"""
+
+
+LOAD_ARCS = """
+UNWIND $arcs AS arc
+MATCH (d:Donor {id: arc.donor}), (p:Patient {id: arc.patient})
+CREATE (d)-[:COMPATIBLE]->(p)
+"""
+SET_SOURCE_PRA = """
+UNWIND $rows AS row
+MATCH (p:Patient {id: row.id})
+SET p.source_pra = row.pra
+"""
+
+# An imported pool has no HLA typing, only the dataset's arcs. Its pool PRA counts the
+# blood-compatible donors the dataset still rules out, which is the share the
+# antibodies would explain in a pool KidneyLoop generated.
+DERIVE_POOL_PRA_FROM_ARCS = """
+MATCH (any:Donor) WITH count(any) AS total
+MATCH (p:Patient)-[:HAS_BLOOD]->(pb:BloodType)
+OPTIONAL MATCH (d:Donor)-[:HAS_BLOOD]->(:BloodType)-[:ABO_CAN_GIVE_TO]->(pb)
+WHERE NOT (d)-[:PAIRED_WITH]->(p) AND NOT (d)-[:COMPATIBLE]->(p)
 WITH p, total, count(DISTINCT d) AS blocked
 SET p.pool_pra = toFloat(blocked) / total
 """
@@ -134,3 +159,11 @@ def load_pool(conn: relate.Connection, pool: Pool) -> None:
 def derive(conn: relate.Connection) -> None:
     conn.execute(DERIVE_COMPATIBLE)
     conn.execute(DERIVE_POOL_PRA)
+
+
+def load_imported(conn: relate.Connection, imported: ImportedPool) -> None:
+    """Write a benchmark pool with the dataset's own compatibility arcs."""
+    load_pool(conn, imported.pool)
+    conn.execute(LOAD_ARCS, {"arcs": [{"donor": d, "patient": p} for d, p in imported.arcs]})
+    conn.execute(SET_SOURCE_PRA, {"rows": [{"id": k, "pra": v} for k, v in imported.source_pra.items()]})
+    conn.execute(DERIVE_POOL_PRA_FROM_ARCS)

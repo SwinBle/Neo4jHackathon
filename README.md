@@ -155,11 +155,24 @@ So for P071 no clinical change helps: each antibody change opens four to six don
 
 To rebuild the store from scratch, install the relate CLI ([install guide](https://relatedb.ai/docs/get-started/install)) and run `kx build` (seed 42, 300 pairs, 10 altruistic donors), then `kx match`. `kx build` with the same seed writes a byte-identical `graph.json`. `kx match` then adds a `MatchRun` whose `created_at` is the time of the run, and it picks the same exchanges every time for the same pool: when several plans tie, the solver's input order is fixed, so the choice does not depend on row order or Python's hash seed. `kx build` refuses to replace a folder that is not a Relate store.
 
+### Importing a published benchmark pool
+
+`kx import-preflib` reads a kidney instance from [PrefLib dataset 00036](https://preflib.github.io/PrefLib-Jekyll/dataset/00036) (synthetic pools from Dickerson, Procaccia and Sandholm, AAMAS 2012) into a new store. The files give the compatibility arcs, not HLA typing, so the store keeps the dataset's arcs as `COMPATIBLE` edges instead of deriving them, and each patient's pool PRA counts the blood-compatible donors the dataset rules out. The dataset's own PRA is kept as `source_pra`.
+
+```bash
+kx import-preflib 00036-00000111.dat --store data/preflib-111
+kx match --store data/preflib-111
+```
+
+On instance 111 (128 pairs, 4,108 arcs) Cypher finds 8,953 cycles, the same count as an independent search, and `kx match` picks 83 transplants. The importer checks every arc against the blood-type rules, the declared edge count and each pair's out-degree, and it refuses what it cannot import faithfully: files with altruistic donors (PrefLib marks them as faulty, and the ones checked here break the blood-type rules) and arc weights other than 1. Dense instances of 512 pairs or more need long cycle enumeration; cycles are fetched 32 first patients at a time so no single result passes the engine's 256 MB value limit.
+
 ### Web explorer
 
 ```bash
 python -m http.server 8000
 ```
+
+Add `?snapshot=<path>` to open another store's `graph.json`, for example `web/?snapshot=../data/preflib-111/graph.json`.
 
 Open <http://localhost:8000/web/>. The page loads `data/kidneyloop/graph.json` into Relate's WebAssembly build in a worker. It shows the latest run as cycle and chain diagrams you can filter and open. It explains any patient with the same text as `kx why`, plus a drawing of the cycles that could serve them, with the patient highlighted and the blocking patients marked. It can withdraw a donor in the tab's copy, and it has a Cypher console. The browser has no solver, so the page shows what breaks and points to `kx whatif` for the re-plan.
 
@@ -248,7 +261,7 @@ What this shows, and what it does not:
 ## Testing and QA
 
 ```bash
-pytest -m "not qa_full"       # 477 tests, about 2 min
+pytest -m "not qa_full"       # 497 tests, about 2 min
 pytest -m qa_full             # the committed 300-pair store, about 2 min
 python scripts/mutation_check.py
 ```

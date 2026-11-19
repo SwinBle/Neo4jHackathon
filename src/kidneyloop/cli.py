@@ -7,13 +7,14 @@ import typer
 
 from .counterfactual import counterfactual as find_counterfactual, render as render_counterfactual
 from .exchanges import find_arcs, find_cycles
+from .datasets import DatasetError, read_preflib
 from .explain import explain, render
 from .generator import generate_pool
 from .policy import DEFAULT_POLICY_FILE, Policy, PolicyError, load_policy
 from .runs import check_inputs, latest_run_id, run_match, run_record
 from .simulate import render as render_simulation, simulate as simulate_plans
 from .solver import OBJECTIVES, Objective
-from .store import create_json_store, derive, load_pool
+from .store import create_json_store, derive, load_imported, load_pool
 from .whatif import withdraw_donor
 
 DEFAULT_STORE = Path("data/kidneyloop")
@@ -92,6 +93,29 @@ def build(
             "OPTIONAL MATCH ()-[c:COMPATIBLE]->() RETURN patients, donors, count(c) AS arcs"
         ).single()
     typer.echo(f"{store}: {counts['patients']} patients, {counts['donors']} donors, {counts['arcs']} compatible arcs")
+
+
+@app.command("import-preflib")
+def import_preflib(
+    dat: Path = typer.Argument(..., help="The instance's .dat file (pairs, blood types, PRA)"),
+    wmd: Path = typer.Argument(None, help="The instance's .wmd arc list; defaults to the .dat path with .wmd"),
+    store: Path = DEFAULT_STORE,
+) -> None:
+    """Import a PrefLib kidney instance (dataset 00036) into a new store, keeping its arcs."""
+    wmd = wmd or dat.with_suffix(".wmd")
+    try:
+        imported = read_preflib(dat, wmd)
+    except OSError as e:
+        raise fail(f"Cannot read {e.filename}: {e.strerror}", 2)
+    except DatasetError as e:
+        raise fail(str(e), 2)
+    try:
+        create_json_store(store)
+    except (FileExistsError, RuntimeError) as e:
+        raise fail(str(e), 2)
+    with open_store(store, read_only=False) as conn:
+        load_imported(conn, imported)
+    typer.echo(f"{store}: {imported.source}, {len(imported.pool.patients)} pairs, {len(imported.arcs)} compatible arcs from the dataset")
 
 
 @app.command()

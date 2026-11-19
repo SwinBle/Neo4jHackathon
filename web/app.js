@@ -1,6 +1,8 @@
 import * as Q from './queries.js';
 
-const SNAPSHOT_URL = '../data/kidneyloop/graph.json';
+// ?snapshot=<path> opens another store's graph.json, such as an imported PrefLib pool.
+const SNAPSHOT_URL = new URLSearchParams(location.search).get('snapshot') ?? '../data/kidneyloop/graph.json';
+const calm = matchMedia('(prefers-reduced-motion: reduce)');
 const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
 const pending = new Map();
 let nextId = 0;
@@ -42,7 +44,9 @@ async function load() {
   if (!state.snapshot) state.snapshot = await (await fetch(SNAPSHOT_URL)).json();
   const loaded = await call({ op: 'load', snapshot: state.snapshot });
   $('#status').textContent =
-    `Relate in this tab holds ${loaded.nodes} nodes and ${loaded.relationships} relationships from data/kidneyloop/graph.json (loaded in ${loaded.ms} ms).`;
+    `Relate in this tab holds ${loaded.nodes.toLocaleString()} nodes and ${loaded.relationships.toLocaleString()} relationships from ${SNAPSHOT_URL.replace(/^\.\.\//, '')}, loaded in ${loaded.ms} ms.`;
+  $('#engine').classList.add('ready');
+  $('#engine span').textContent = 'Relate WebAssembly ready in this tab';
   state.withdrawn = null;
   await showRun();
 }
@@ -64,7 +68,7 @@ async function showRun() {
   const inLoops = loops.reduce((n, e) => n + e.patients.length, 0);
   const inChains = chains.reduce((n, e) => n + e.patients.length, 0);
   const unmatched = summary.patients - state.holder.size;
-  $('#headline').textContent = `${summary.transplants} of ${summary.patients} patients get a kidney in this round`;
+  $('#headline').replaceChildren(countUp(summary.transplants), ` of ${summary.patients} patients get a kidney in this round`);
   $('#round-total').textContent = `Run ${summary.run}, chosen from ${summary.cycles.toLocaleString()} possible loops and ${summary.arcs.toLocaleString()} donor-to-patient matches`;
   const [cyc, chn, rest] = $('#bar').children;
   rest.style.flexGrow = summary.patients;
@@ -94,8 +98,71 @@ function drawHero(loops) {
   const svg = exchangeSvg(loop, new Map(), HERO);
   svg.classList.add('draw');
   [...svg.querySelectorAll('.edge')].forEach((edge, i) => { edge.style.animationDelay = `${300 + i * 650}ms`; });
-  const steps = loop.donors.map((d, i) => `${d} gives to ${loop.patients[i]}`).join(', ');
-  $('#hero-figure').replaceChildren(svg, el('figcaption', {}, `Exchange ${loop.id} from this run: ${steps}.`));
+  $('#stage-title').textContent = `exchange ${loop.id} from run ${state.run}`;
+  $('#hero-figure').replaceChildren(svg);
+  $('#hero-steps').replaceChildren(
+    ...loop.donors.map((d, i) => el('li', {}, el('b', {}, String(i + 1)), el('span', {}, `${d}, who came with ${loop.patients[(i + loop.patients.length - 1) % loop.patients.length]}, gives a kidney to ${loop.patients[i]}.`))),
+    el('li', { class: 'on' }, el('b', {}, '✓'), el('span', {}, 'Every patient in the loop receives a kidney, and every donor gives exactly one.')),
+  );
+  animateHero(svg, loop);
+}
+
+function countUp(target) {
+  const span = el('span', { class: 'count' }, String(target));
+  if (calm.matches) return span;
+  const started = performance.now();
+  const tick = (now) => {
+    const t = Math.min((now - started) / 1200, 1);
+    span.textContent = String(Math.round(target * (1 - (1 - t) ** 3)));
+    if (t < 1) requestAnimationFrame(tick);
+  };
+  span.textContent = '0';
+  requestAnimationFrame(tick);
+  return span;
+}
+
+// A kidney travels each arrow in turn, and the matching step lights up, so the
+// order of a swap reads without words.
+let heroLoop = 0;
+function animateHero(svg, loop) {
+  const run = ++heroLoop;
+  const steps = [...document.querySelectorAll('#hero-steps li')];
+  const lines = [...svg.querySelectorAll('.edge')];
+  const nodes = [...svg.querySelectorAll('.node')];
+  if (calm.matches || !lines.length) { steps.forEach((s) => s.classList.add('on')); return; }
+  const ns = 'http://www.w3.org/2000/svg';
+  const kidney = document.createElementNS(ns, 'circle');
+  kidney.setAttribute('r', '6');
+  kidney.setAttribute('class', 'kidney');
+  const halo = document.createElementNS(ns, 'circle');
+  halo.setAttribute('class', 'halo');
+  svg.append(halo, kidney);
+  let k = 0;
+  const hop = () => {
+    if (run !== heroLoop) return;
+    const line = lines[k];
+    const [x1, y1, x2, y2] = ['x1', 'y1', 'x2', 'y2'].map((a) => Number(line.getAttribute(a)));
+    steps.forEach((s, i) => s.classList.toggle('on', i <= k));
+    const started = performance.now();
+    const move = (now) => {
+      if (run !== heroLoop) return;
+      const t = Math.min((now - started) / 1100, 1);
+      const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+      kidney.setAttribute('cx', x1 + (x2 - x1) * e);
+      kidney.setAttribute('cy', y1 + (y2 - y1) * e);
+      if (t < 1) { requestAnimationFrame(move); return; }
+      const target = nodes[loop.kind === 'chain' ? k + 1 : k];
+      halo.setAttribute('cx', target.getAttribute('cx'));
+      halo.setAttribute('cy', target.getAttribute('cy'));
+      halo.classList.remove('ping');
+      void halo.getBBox();
+      halo.classList.add('ping');
+      k = (k + 1) % lines.length;
+      setTimeout(hop, k === 0 ? 1600 : 350);
+    };
+    requestAnimationFrame(move);
+  };
+  setTimeout(hop, 300 + lines.length * 650);
 }
 
 function freshen(node) {
@@ -321,6 +388,14 @@ async function runConsole() {
 $('#why-form').addEventListener('submit', (ev) => { ev.preventDefault(); explain($('#patient').value); });
 $('#whatif-form').addEventListener('submit', (ev) => { ev.preventDefault(); withdraw($('#donor').value); });
 $('#reset').addEventListener('click', () => { $('#whatif-out').replaceChildren(); load(); });
+const THEMES = { dark: 'Light theme', light: 'Dark theme' };
+const currentTheme = () => document.documentElement.dataset.theme ?? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+$('#theme').textContent = THEMES[currentTheme()];
+$('#theme').addEventListener('click', () => {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  $('#theme').textContent = THEMES[next];
+});
 $('#console-form').addEventListener('submit', (ev) => { ev.preventDefault(); runConsole(); });
 const EXAMPLES = [
   ['Antigens that block most patients', `MATCH (p:Patient)-[:HAS_ANTIBODY]->(a:Antigen)

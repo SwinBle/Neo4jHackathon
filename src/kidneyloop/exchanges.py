@@ -29,7 +29,10 @@ def _cycle_query(length: int) -> str:
     long pattern with the filters at the end measured about twice as slow on the
     300-pair store.
     """
-    stages = ["MATCH (d1:Donor)-[:PAIRED_WITH]->(p1:Patient), (d1)-[:COMPATIBLE]->(p2:Patient) WHERE p1.id < p2.id"]
+    stages = [
+        "MATCH (d1:Donor)-[:PAIRED_WITH]->(p1:Patient) WHERE p1.id IN $first "
+        "MATCH (d1)-[:COMPATIBLE]->(p2:Patient) WHERE p1.id < p2.id"
+    ]
     for i in range(2, length):
         earlier = " AND ".join(f"p{i + 1} <> p{j}" for j in range(2, i + 1))
         stages.append(
@@ -58,11 +61,22 @@ ORDER BY donor, patient
 """
 
 
+PAIRED_PATIENTS = "MATCH (:Donor)-[:PAIRED_WITH]->(p:Patient) RETURN p.id AS id ORDER BY id"
+
+# Patients per query. The engine builds a whole result as one value capped at 256 MB,
+# and a dense pool has many cycles per patient (a 512-pair PrefLib instance exceeded
+# the cap in one query), so cycles are fetched a batch of first patients at a time.
+FIRST_PATIENT_BATCH = 32
+
+
 def find_cycles(conn: relate.Connection, max_length: int = 3) -> list[Exchange]:
+    patients = [row["id"] for row in conn.execute(PAIRED_PATIENTS)]
+    batches = [patients[i : i + FIRST_PATIENT_BATCH] for i in range(0, len(patients), FIRST_PATIENT_BATCH)]
     return [
         Exchange("cycle", tuple(row["donors"]), tuple(row["patients"]))
         for length in range(2, max_length + 1)
-        for row in conn.execute(_cycle_query(length))
+        for batch in batches
+        for row in conn.execute(_cycle_query(length), {"first": batch})
     ]
 
 
