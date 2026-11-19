@@ -122,7 +122,7 @@ def import_preflib(
 
 @app.command()
 def cpra(
-    population: str = typer.Option(DEFAULT_POPULATION, help="NMDP population code; SCSEAI is South East Asian"),
+    population: str = typer.Option(DEFAULT_POPULATION, help="NMDP population code; SCSEAI is Other Southeast Asian"),
     cache: Path = typer.Option(Path("data/cache"), help="Where the downloaded reference files are kept"),
     store: Path = DEFAULT_STORE,
 ) -> None:

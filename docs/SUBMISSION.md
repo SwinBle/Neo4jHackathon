@@ -16,7 +16,7 @@ https://github.com/SwinBle/Neo4jHackathon (public, topics `relate` and `relate-n
 
 ## Demo video
 
-https://youtu.be/cnwWKqEXoWQ (unlisted, 1:42)
+https://youtu.be/cnwWKqEXoWQ (unlisted, 1:42). TODO: replace with the new recording once it is uploaded; the old video stays up.
 
 ## About the project
 
@@ -32,6 +32,9 @@ Many people who need a kidney have a relative or friend willing to donate, but t
 - `kx counterfactual <patient>` tries single changes (one antibody less, longer chains, 3-way cycles, the patient required) and verifies each by re-solving the whole pool inside a rolled-back transaction, reporting who would lose a kidney.
 - `kx whatif --withdraw <donor>` repairs the plan the way programs do: intact exchanges stay, only freed and unmatched patients are re-planned. It reports who loses a kidney and who needs a new crossmatch, compares with a full re-plan (which would move 155 patients), and rolls back.
 - `kx audit` compares a SHA-256 of the solver's inputs and policy, stored on every MatchRun, with the store as it is now; `why`, `whatif` and `counterfactual` warn when an answer may be stale.
+- `kx status` tracks each exchange after the plan: proposed, accepted, crossmatch passed or failed, scheduled, transplanted, declined or cancelled. Every change is an event in the graph, held exchanges keep their people out of the next round, failed ones release them, and only the latest run's proposals can be accepted, so nobody is promised twice.
+- `kx cpra` computes each patient's CPRA the way OPTN defines it, from NMDP haplotype frequencies (default population "Other Southeast Asian", the closest NMDP group to Thailand) and the IPD-IMGT/HLA serology table; a policy can rank by CPRA instead of pool PRA.
+- `kx import-preflib` loads published benchmark pools (PrefLib dataset 00036) with their own compatibility arcs. On the 512-pair instance Cypher finds 535,344 cycles, the same count as a separate search, and `scripts/check_preflib.py` reproduces it.
 - A web explorer runs the same Cypher in the browser on Relate's WebAssembly build and draws the cycles behind each answer. An MCP config lets any agent query the store read-only.
 
 ### How it uses Relate
@@ -48,19 +51,20 @@ Donor `PAIRED_WITH` Patient; Donor and Patient `HAS_BLOOD` BloodType, which `ABO
 
 ### Testing
 
-478 tests, including a brute-force optimality check of the solver on 150 random pools, the expected objective checked against an exhaustive search, Cypher cycle enumeration checked against an independent search, reproducibility across row order and Python hash seeds, end-to-end runs of the real CLI and MCP server, and a mutation check that plants fourteen bugs and confirms the suite catches each. CI runs all of it on Linux.
+561 tests, including a brute-force optimality check of the solver on 150 random pools, the expected objective checked against an exhaustive search, Cypher cycle enumeration checked against an independent search (also on PrefLib instances, through `scripts/check_preflib.py`), the exchange lifecycle's legal and illegal moves, reproducibility across row order and Python hash seeds, end-to-end runs of the real CLI and MCP server, and a mutation check that plants 21 bugs and confirms the suite catches each. CI runs all of it on Linux.
 
 ### Data and safety
 
-All patients and donors are synthetic, generated from a fixed seed. The compatibility rules are simplified, pool PRA stands in for CPRA, and the failure model assumes independent transplants; the simulation measures the gain if that model is right. This is a demonstration, not a clinical tool.
+All patients and donors are synthetic, generated from a fixed seed; PrefLib pools are synthetic too. The compatibility rules are simplified, CPRA uses a regional NMDP population rather than Thai typing data, NMDP and IMGT files are downloaded at run time because their licences forbid redistributing modified copies, and the failure model assumes independent transplants; the simulation measures the gain if that model is right. This is a demonstration, not a clinical tool.
 
 ## Built with
 
-relate, relate-db (Python), @relate/relate-wasm, Cypher, MCP, Python, scipy (HiGHS), numpy, typer, pytest, JavaScript, GitHub Actions
+relate, relate-db (Python), @relate/relate-wasm, Cypher, MCP, Python, scipy (HiGHS), numpy, typer, pytest, JavaScript, GitHub Actions, PrefLib, NMDP haplotype frequencies, IPD-IMGT/HLA
 
 ## Capabilities, third-party tools and AI tools used (required by the rules)
 
 - Relate capabilities: embedded Python client, Cypher multi-hop patterns, transactions with rollback, read-only opens, directory store with the json codec, the relate CLI, the MCP server, the WebAssembly build.
+- Third-party data, downloaded at run time and not committed: PrefLib dataset 00036, NMDP 7-locus haplotype frequencies (Zenodo 4474442, CC BY-NC-ND 4.0), IPD-IMGT/HLA rel_dna_ser.txt 3.60.0 (CC BY-ND).
 - Third-party libraries: scipy and numpy (BSD), typer (MIT), pytest (MIT). `web/relate/` is the unmodified `@relate/relate-wasm` 1.1.0 package (Apache-2.0).
 - AI tools: the project was planned, written and tested with Claude Code (Anthropic), working with the author. The author chose the idea and the design decisions and reviewed the result.
 

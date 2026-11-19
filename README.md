@@ -164,7 +164,7 @@ kx import-preflib 00036-00000111.dat --store data/preflib-111
 kx match --store data/preflib-111
 ```
 
-The figures in this paragraph come from one manual run on 2026-11-19. The PrefLib files are not committed, and the tests use a small synthetic instance in the same format, so nothing in CI reproduces them; the commands above do. On instance 111 (128 pairs, 4,108 arcs) Cypher finds 8,953 cycles, the same count as a separate brute-force search written for the check (not in the repo), and `kx match` picks 83 transplants. The importer checks every arc against the blood-type rules, the declared edge count and each pair's out-degree, and it refuses what it cannot import faithfully: files with altruistic donors (PrefLib marks them as faulty, and the one checked here, instance 50, has arcs that break the blood-type rules) and arc weights other than 1. Instance 200 (512 pairs, 63,154 arcs) has 535,344 cycles of up to 3, again the same count as an independent search. Cypher enumerates them in about 3 minutes, and HiGHS then picks 312 transplants in about 4.5 minutes (both measured while the test suite ran on the same machine). Cycles are fetched 32 first patients at a time; in one query this pool's result passed the engine's 256 MB value limit.
+`python scripts/check_preflib.py 111 200 --match` reproduces the figures in this paragraph. It downloads each instance from a pinned PrefLib-Data commit into `data/cache/preflib/`, counts cycles with KidneyLoop's Cypher and with a separate Python search over the dataset's arcs, and exits 1 if the counts differ. The PrefLib files are not committed and CI does not download them, so the tests use a small synthetic instance in the same format. On instance 111 (128 pairs, 4,108 arcs) Cypher finds 8,953 cycles, the same count as the script's separate search, and `kx match` picks 83 transplants. The importer checks every arc against the blood-type rules, the declared edge count and each pair's out-degree, and it refuses what it cannot import faithfully: files with altruistic donors (PrefLib marks them as faulty, and the one checked here, instance 50, has arcs that break the blood-type rules) and arc weights other than 1. Instance 200 (512 pairs, 63,154 arcs) has 535,344 cycles of up to 3, again the same count as an independent search. Cypher enumerates them in about 3.5 minutes, and `kx match`, which enumerates them again before HiGHS solves, picks 312 transplants in about 8 minutes (one run of the script on a Windows laptop with nothing else running). Cycles are fetched 32 first patients at a time; in one query this pool's result passed the engine's 256 MB value limit.
 
 ### Web explorer
 
@@ -299,7 +299,7 @@ On the committed pool, in a manual run on 2026-11-19 (the NMDP file is downloade
 ## Testing and QA
 
 ```bash
-pytest -m "not qa_full"       # 559 tests, about 1 min
+pytest -m "not qa_full"       # 561 tests, about 1 min
 pytest -m qa_full             # the committed 300-pair store, about 2 min
 python scripts/mutation_check.py
 ```
